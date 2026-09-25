@@ -18,7 +18,7 @@ export function Headline({ main, prop, fcTop }: { main: Station[]; prop: any; fc
   if (top?.level?.changes["24h"]?.delta_m && top.level.changes["24h"].delta_m > 0.02)
     parts.push(<span key="t">Mayor subida en 24 h: <b>{top.name} ({cm(top.level.changes["24h"].delta_m)})</b>. </span>);
   const sig = prop?.signals?.[0];
-  const next = sig?.downstream?.find((d: any) => !d.already_rising && d.hours_from_now[1] >= 0);
+  const next = sig?.downstream?.find((d: any) => !d.already_rising && d.hours_from_now[1] >= 0 && d.confidence !== "baja");
   if (next) parts.push(next.peak_known
     ? <span key="p">Estimación estadística: el pico de {sig.name} podría llegar a <b>{next.to_name}</b> en ~{Math.round(Math.max(next.hours_from_now[0], 0))}–{Math.round(next.hours_from_now[1])} h. </span>
     : <span key="p">{sig.name} sigue subiendo; estimación estadística: el pico no llegaría a <b>{next.to_name}</b> antes de ~{Math.round(Math.max(next.hours_from_now[0], 0))} h. </span>);

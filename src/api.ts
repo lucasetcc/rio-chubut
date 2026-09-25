@@ -231,7 +231,7 @@ function evalAlerts() {
         }
       } else if (rule.type === "propagation") {
         for (const sig of prop().signals) for (const d of sig.downstream) {
-          if ((!rule.station_key || d.to === rule.station_key) && !d.already_rising && d.hours_from_now[1] >= 0) {
+          if ((!rule.station_key || d.to === rule.station_key) && !d.already_rising && d.hours_from_now[1] >= 0 && d.confidence !== "baja") {
             const [a, b] = d.hours_from_now;
             push(d.to, d.peak_known
               ? `El pico de ${sig.name} podría llegar a ${d.to_name} en ~${Math.round(Math.max(a, 0))}–${Math.round(b)} h (estimación estadística).`

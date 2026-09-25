@@ -487,12 +487,17 @@ export function propagation(stations: { key: string; name: string }[], data: Rec
   const pairs: any[] = [], direct: any[] = [];
   for (let i = 0; i + 1 < chain.length; i++) pairs.push(pairOf(i, i + 1));
   for (let i = 0; i < chain.length; i++) for (let j = i + 2; j < chain.length; j++) direct.push(pairOf(i, j));
-  const between = (i: number, j: number): [number, number] | null => {
+  const RANK: Record<string, number> = { baja: 0, media: 1, alta: 2 };
+  const between = (i: number, j: number): { r: [number, number]; conf: string } | null => {
     const d = direct.find((p) => p.from === chain[i].key && p.to === chain[j].key && p.ok);
-    if (d) return d.lag_range_h;
-    let lo = 0, hi = 0;
-    for (let k = i; k < j; k++) { const p = pairs[k]; if (!p.ok) return null; lo += p.lag_range_h[0]; hi += p.lag_range_h[1]; }
-    return [lo, hi];
+    if (d) return { r: d.lag_range_h, conf: d.confidence || "media" };
+    let lo = 0, hi = 0, conf = "alta";
+    for (let k = i; k < j; k++) {
+      const p = pairs[k]; if (!p.ok) return null;
+      lo += p.lag_range_h[0]; hi += p.lag_range_h[1];
+      if ((RANK[p.confidence] ?? 1) < RANK[conf]) conf = p.confidence;
+    }
+    return { r: [lo, hi], conf };
   };
   const signals: any[] = [];
   chain.forEach((s, i) => {
@@ -514,21 +519,23 @@ export function propagation(stations: { key: string; name: string }[], data: Rec
     const ref = peaked ? pk[0] : pts[pts.length - 1][0];
     const downstream: any[] = [];
     for (let j = i + 1; j < chain.length; j++) {
-      const r = between(i, j);
-      if (!r) continue;
+      const bj = between(i, j);
+      if (!bj) continue;
+      const r = bj.r;
       const tgt = chain[j];
       const etaLo = ref + r[0] * H, etaHi = ref + r[1] * H;
       downstream.push({ to: tgt.key, to_name: tgt.name, lag_range_h: r, eta_from: iso(etaLo), eta_to: iso(etaHi), peak_known: peaked,
         hours_from_now: [Math.round(((etaLo - now) / H) * 10) / 10, Math.round(((etaHi - now) / H) * 10) / 10],
-        already_rising: trend(win[tgt.key]).label === "SUBIENDO" });
+        already_rising: trend(win[tgt.key]).label === "SUBIENDO", confidence: bj.conf });
     }
     const msgs = [`Subida en ${s.name} (+${Math.round(riseCm)} cm) que empezó hace unas ${Math.round(hoursAgo)} h${peaked ? `; el pico fue ${fDateShort(pk[0])}` : "; todavía sin pico"}.`];
     for (const d of downstream) {
       const [a, b] = d.hours_from_now;
+      const low = d.confidence === "baja" ? " (confianza baja)" : "";
       const what = peaked ? "el pico podría llegar a" : "el pico no llegaría antes de ~";
       if (b < 0) msgs.push(`${d.to_name}: la ventana estimada ya pasó (${Math.round(-b)}–${Math.round(-a)} h atrás)${d.already_rising ? "; está subiendo" : ""}.`);
-      else if (peaked) msgs.push(`Estimación: ${what} ${d.to_name} en ~${Math.round(Math.max(a, 0))}–${Math.round(b)} h.`);
-      else msgs.push(`Estimación: en ${d.to_name} ${what}${Math.round(Math.max(a, 0))} h (${d.lag_range_h[0] === d.lag_range_h[1] ? d.lag_range_h[0] : `${d.lag_range_h[0]}–${d.lag_range_h[1]}`} h después del pico en ${s.name}).`);
+      else if (peaked) msgs.push(`Estimación${low}: ${what} ${d.to_name} en ~${Math.round(Math.max(a, 0))}–${Math.round(b)} h.`);
+      else msgs.push(`Estimación${low}: en ${d.to_name} ${what}${Math.round(Math.max(a, 0))} h (${d.lag_range_h[0] === d.lag_range_h[1] ? d.lag_range_h[0] : `${d.lag_range_h[0]}–${d.lag_range_h[1]}`} h después del pico en ${s.name}).`);
     }
     if (!downstream.length && i < chain.length - 1) msgs.push("No hay suficientes crecidas históricas emparejadas para estimar tiempos aguas abajo.");
     signals.push({ station: s.key, name: s.name, onset: iso(onset), hours_ago: hoursAgo, rise_cm: riseCm, peaked, peak_ts: iso(pk[0]), downstream, messages: msgs });

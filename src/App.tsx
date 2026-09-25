@@ -120,7 +120,7 @@ export default function App() {
   const main = stations.filter((s) => s.main && s.has_level).sort((a, b) => (a.chain_order || 0) - (b.chain_order || 0));
   const others = stations.filter((s) => !s.main);
   const TRIB_ORDER = ["norquinco", "gualjaina_rio", "tecka", "chico_ameghino"];
-  const tribs = stations.filter((s) => s.kind === "hydro" && !s.main && s.has_level && s.chain_order == null)
+  const tribs = stations.filter((s) => s.kind === "hydro" && !s.main && s.has_level && s.chain_order == null && s.key !== "chico_ameghino")
     .sort((a, b) => (TRIB_ORDER.indexOf(a.key) + 99) % 99 - (TRIB_ORDER.indexOf(b.key) + 99) % 99);
   const activeAlerts = alerts.filter((a) => !a.cleared_at);
   const empty = !status?.last_data_ts;
