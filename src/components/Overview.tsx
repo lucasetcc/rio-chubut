@@ -1,5 +1,5 @@
 import { Station } from "../api";
-import { ago, cm, cssVar, fDateTime, num, stationColor } from "../fmt";
+import { ago, cm, cssVar, dev, fDateTime, num, stationColor } from "../fmt";
 import { PCT_VAR, STATUS_VAR } from "./StationCards";
 
 const join = (xs: string[]) => (xs.length <= 1 ? xs.join("") : `${xs.slice(0, -1).join(", ")} y ${xs[xs.length - 1]}`);
@@ -82,7 +82,10 @@ export function RiverProfile({ main, prop, dam }: { main: Station[]; prop: any; 
               <text x={xs[i]} y={30} textAnchor="middle" className="lbl">{s.name}</text>
               <circle cx={xs[i]} cy={y0} r={11} fill={cssVar("var(--panel)")} stroke={c} strokeWidth={3} />
               <circle cx={xs[i]} cy={y0} r={4.5} fill={stationColor(s.key)} />
-              <text x={xs[i]} y={y0 + 32} textAnchor="middle" className="val">{s.level ? `${num(s.level.value)} m` : "s/d"}</text>
+              <text x={xs[i]} y={y0 + 32} textAnchor="middle" className="val" style={{ fill: s.stats_brief?.pct_class ? cssVar(PCT_VAR[s.stats_brief.pct_class.code]) : undefined }}>
+                <title>{s.level ? `Lectura de escala ${num(s.level.value)} m (no es profundidad)` : ""}</title>
+                {s.level ? (s.stats_brief?.hist?.median != null ? `${dev(s.level.value - s.stats_brief.hist.median)} vs normal` : `escala ${num(s.level.value)} m`) : "s/d"}
+              </text>
               <text x={xs[i]} y={y0 + 48} textAnchor="middle" className="sub" style={{ fill: d24 == null ? undefined : d24 > 0.005 ? cssVar("var(--pos)") : d24 < -0.005 ? cssVar("var(--neg)") : undefined }}>
                 {d24 == null ? "—" : `${cm(d24)} 24 h`}
               </text>
@@ -99,7 +102,7 @@ export function RiverProfile({ main, prop, dam }: { main: Station[]; prop: any; 
           <rect x={xs[n - 1] - 14} y={y0 - 14} width={28} height={28} rx={6} fill={cssVar("var(--panel-3)")} stroke={line} strokeWidth={2} />
           <rect x={xs[n - 1] - 3} y={y0 - 9} width={6} height={18} rx={1.5} fill={accent} />
           <text x={xs[n - 1]} y={y0 + 32} textAnchor="middle" className="val">{cota?.available ? `${num(cota.last.value)} m` : "cota s/d"}</text>
-          <text x={xs[n - 1]} y={y0 + 48} textAnchor="middle" className="sub">{cota?.available ? `manual · ${fDateTime(cota.last.ts).slice(0, 10)}` : "sin dato público"}</text>
+          <text x={xs[n - 1]} y={y0 + 48} textAnchor="middle" className="sub">{cota?.available ? `publicado ${cota.last.ts_local}` : "sin dato público"}</text>
         </g>
       </svg>
     </div>

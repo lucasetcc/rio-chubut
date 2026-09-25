@@ -184,7 +184,16 @@ async function loadSeries(st: SeriesState) {
           continue;
         }
       }
-      if (!near && Math.abs(d1) > th && (b.t - a.t) > 7 * D) st.baseFrom = b.t; // probable cambio de cero: la historia comparable empieza acá
+      // Cambio de cero de escala: escalón grande tras un corte, y DESPUÉS el río nunca vuelve al rango previo.
+      // (Una crecida o una bajada normal sí vuelve a pasar por esos niveles, así que no se confunde.)
+      if (!near && (b.t - a.t) > 7 * D) {
+        const pre = ok.filter((o) => o.t <= a.t && o.t >= a.t - 60 * D).map((o) => o.v as number).sort((x, y) => x - y);
+        const post = ok.filter((o) => o.t >= b.t).map((o) => o.v as number);
+        if (pre.length >= 10 && post.length >= 10) {
+          const p5 = pre[Math.floor(pre.length * 0.05)], p95 = pre[Math.floor(pre.length * 0.95)];
+          if ((d1 > 0 && Math.min(...post) > p95 + 0.3) || (d1 < 0 && Math.max(...post) < p5 - 0.3)) st.baseFrom = b.t;
+        }
+      }
       st.issues.push({ ts: iso(b.t), issue: "level_shift", detail: `escalón de ${d1 > 0 ? "+" : ""}${d1.toFixed(2)} m ${near ? "" : `tras ${Math.round((b.t - a.t) / D)} días sin datos `}(crecida real o posible cambio de cero de escala)` });
     }
   }

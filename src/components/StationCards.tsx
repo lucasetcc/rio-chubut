@@ -1,5 +1,5 @@
 import { Station } from "../api";
-import { ago, cm, fDateTime, num, signed, STATION_COLOR, stationColor } from "../fmt";
+import { ago, cm, dev, fDateTime, num, signed, STATION_COLOR, stationColor } from "../fmt";
 
 export function StatusBadge({ s }: { s?: Station["status"] }) {
   if (!s) return <span className="badge b-nodata">SIN DATOS</span>;
@@ -45,7 +45,7 @@ export function PctBar({ s }: { s: Station }) {
         <i className="band" style={{ left: "25%", width: "50%" }} />
         <i className="mark" style={{ left: `${Math.min(100, Math.max(0, b.pct))}%`, background: c }} />
       </div>
-      <div className="pct-sub">normal: {num(b.hist?.p25)}–{num(b.hist?.p75)} m · {b.history_days} d de historia</div>
+      <div className="pct-sub">rango normal de escala: {num(b.hist?.p25)}–{num(b.hist?.p75)} m · {Math.round(b.history_days / 365 * 10) / 10 >= 1 ? `${(Math.round(b.history_days / 36.5) / 10).toLocaleString("es-AR")} años` : `${b.history_days} días`} de historia</div>
     </div>
   );
 }
@@ -63,10 +63,23 @@ export function StationCard({ s }: { s: Station }) {
       </div>
       {lv ? (
         <>
-          <div className="big">{num(lv.value)}<small>m</small>
-            {tr?.cm_per_day != null && <span className={`rate ${tr.cm_per_day > 0 ? "up" : tr.cm_per_day < 0 ? "down" : "muted"}`}>{signed(tr.cm_per_day, " cm/d")}</span>}
-          </div>
-          <div className="caption">Nivel (escala local) · caudal: sin datos públicos</div>
+          {(() => {
+            const med = s.stats_brief?.hist?.median;
+            const d = med == null ? null : lv.value - med;
+            const cls = s.stats_brief?.pct_class;
+            return <>
+              <div className="big" style={{ color: cls ? PCT_VAR[cls.code] : undefined }}>
+                {d == null ? <>{num(lv.value)}<small>m</small></> : dev(d)}
+                {tr?.cm_per_day != null && <span className={`rate ${tr.cm_per_day > 0 ? "up" : tr.cm_per_day < 0 ? "down" : "muted"}`}>{signed(tr.cm_per_day, " cm/d")}</span>}
+              </div>
+              <div className="caption">
+                {d == null ? "Lectura de escala (sin historia para comparar)" : <>respecto de lo normal <span title="Mediana de todos los días registrados en esta estación">(mediana {num(med)} m)</span></>}
+              </div>
+              <div className="scale" title="Es la lectura de la regla/sensor de esta estación. Su cero es arbitrario: NO es la profundidad del río y no se compara entre estaciones.">
+                Lectura de escala: <b>{num(lv.value)} m</b> <span className="muted">· no es profundidad ⓘ</span>
+              </div>
+            </>;
+          })()}
           <PctBar s={s} />
           <Sparkline pts={s.spark} color={color} />
           <div className="deltas">
@@ -96,7 +109,7 @@ export function StationTable({ stations }: { stations: Station[] }) {
       <table>
         <thead>
           <tr>
-            <th>Estación</th><th>Tipo</th><th className="n">Nivel (m)</th><th className="n">Caudal</th><th className="n">1 h</th><th className="n">6 h</th>
+            <th>Estación</th><th>Tipo</th><th className="n">vs normal</th><th className="n">Percentil</th><th className="n">Escala (m)</th><th className="n">Caudal</th><th className="n">1 h</th><th className="n">6 h</th>
             <th className="n">24 h</th><th>Tendencia</th><th className="n">Lluvia 24 h</th><th>Último dato</th><th>Fuente</th>
           </tr>
         </thead>
@@ -109,7 +122,9 @@ export function StationTable({ stations }: { stations: Station[] }) {
                 <div className="small muted">{s.river}{s.notes ? ` · ${s.notes}` : ""}</div>
               </td>
               <td className="small">{s.kind === "rain" ? "Meteorológica" : s.kind === "dam_outflow" ? "Río bajo el dique" : s.chain_order ? "Río Chubut" : "Afluente"}</td>
-              <td className="n">{s.level ? num(s.level.value) : "—"}</td>
+              <td className="n"><b>{s.level && s.stats_brief?.hist?.median != null ? dev(s.level.value - s.stats_brief.hist.median) : "—"}</b></td>
+              <td className="n">{s.stats_brief?.pct != null ? `P${Math.round(s.stats_brief.pct)} · ${s.stats_brief.pct_class?.label}` : "—"}</td>
+              <td className="n muted">{s.level ? num(s.level.value) : "—"}</td>
               <td className="n nodata">{s.has_level ? "s/d" : "—"}</td>
               <td className="n">{s.level ? (s.level.changes["1h"]?.delta_m == null ? "n/d" : cm(s.level.changes["1h"].delta_m)) : "—"}</td>
               <td className="n">{s.level ? cm(s.level.changes["6h"]?.delta_m) : "—"}</td>

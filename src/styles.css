@@ -217,3 +217,8 @@ footer.foot .wrap { display: flex; gap: 20px; flex-wrap: wrap; justify-content: 
 .pct-track .band { position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--ok) 28%, transparent); border-radius: 2px; }
 .pct-track .mark { position: absolute; top: -4px; width: 4px; height: 14px; border-radius: 2px; transform: translateX(-50%); box-shadow: 0 0 0 2px var(--panel); }
 .pct-sub { font-size: 11px; color: var(--muted); }
+
+.st-card .scale { font-size: 11.5px; color: var(--text-2); margin-top: 6px; padding: 4px 8px; background: var(--panel-2); border-radius: 7px; cursor: help; }
+
+.st-card .big { white-space: nowrap; font-size: 29px; }
+.st-card .big .rate { white-space: nowrap; font-size: 11.5px; }

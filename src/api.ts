@@ -60,6 +60,7 @@ import { CFG, D, H, iso, localDate, P } from "./data/analytics";
 import { DEFAULT_RULES, lastTs, loadAll, loadHist, loadSettings, S, seriesOf, Settings, sourceUrl, usable } from "./data/engine";
 import { fDateTime } from "./fmt";
 import seed from "./data/stations.json";
+import damRef from "./data/dam_reference.json";
 
 const localStr = (t: string | number | null | undefined) => (t == null ? null : fDateTime(typeof t === "number" ? iso(t) : t));
 
@@ -340,11 +341,18 @@ export const api = {
     await loadAll();
     const cfg = settings();
     const UNITS: Record<string, string> = { cota: "m", volumen: "hm³", almacenamiento_pct: "%", caudal_entrante: "m³/s", caudal_saliente: "m³/s", generacion: "MW" };
+    const refs: any[] = (damRef as any).references;
+    const refVal = (k: string) => refs.find((r) => r.key === k)?.value ?? null;
     const out: any = { name: "Dique Florentino Ameghino", lat: -43.698, lon: -66.475,
-      public_source_note: "No se encontró una fuente pública estructurada (API/series) para cota, volumen, caudales ni generación del embalse. El INA publica solo la escala del río AGUAS ABAJO del dique. Los valores del embalse se pueden cargar manualmente desde comunicados oficiales (p.ej. IPA Chubut) y se muestran como MANUAL con su fuente.",
-      cota_max_normal: cfg.dam_limits?.cota_max_normal ?? null, cota_min_operativa: cfg.dam_limits?.cota_min_operativa ?? null, variables: {} };
+      public_source_note: "No existe una publicación oficial periódica (API, parte diario o serie) de cota, volumen, caudales ni generación del embalse. Los valores de abajo son declaraciones del IPA recogidas por medios, con su fecha y fuente. El INA solo mide el río AGUAS ABAJO del dique.",
+      references: refs,
+      cota_max_normal: cfg.dam_limits?.cota_max_normal ?? refVal("cota_vertedero"), cota_min_operativa: cfg.dam_limits?.cota_min_operativa ?? refVal("cota_min_operativa"),
+      variables: {} };
+    const pub = (damRef as any).readings.map((r: any, i: number) => ({ ...r, id: `pub${i}`, ts: new Date(`${r.ts}T12:00:00-03:00`).toISOString(), source_url: r.url, quality: r.approx ? "PUBLICADO (aprox.)" : "PUBLICADO" }));
+    const allRows = [...pub, ...cfg.dam.map((r: any) => ({ ...r, quality: "MANUAL" }))];
+    out.chronology = [...allRows].sort((a: any, b: any) => b.ts.localeCompare(a.ts)).map((r: any) => ({ ...r, ts_local: localStr(r.ts)?.slice(0, 10) }));
     for (const [v, unit] of Object.entries(UNITS)) {
-      const rows = cfg.dam.filter((r: any) => r.variable === v).sort((a: any, b: any) => a.ts.localeCompare(b.ts));
+      const rows = allRows.filter((r: any) => r.variable === v).sort((a: any, b: any) => a.ts.localeCompare(b.ts));
       if (!rows.length) { out.variables[v] = { available: false, unit, message: "Sin datos públicos disponibles." }; continue; }
       const last = rows[rows.length - 1];
       const tl = Date.parse(last.ts);
@@ -354,7 +362,18 @@ export const api = {
         const ref = an.valueAt(pts, tl - h * H, tol);
         ch[k] = ref ? Math.round((last.value - ref[1]) * 1000) / 1000 : null;
       }
-      out.variables[v] = { available: true, unit, last: { ...last, ts_local: localStr(last.ts) }, age_days: Math.round(((Date.now() - tl) / D) * 10) / 10, changes: ch };
+      out.variables[v] = { available: true, unit, last: { ...last, ts_local: localStr(last.ts)?.slice(0, 10) }, age_days: Math.round(((Date.now() - tl) / D) * 10) / 10, changes: ch };
+    }
+    const cota = out.variables.cota;
+    if (cota.available) {
+      const c = cota.last.value;
+      out.status = {
+        cota: c, date: cota.last.ts, age_days: cota.age_days,
+        vs_max: refVal("cota_vertedero") != null ? c - refVal("cota_vertedero") : null,
+        vs_min_hist: refVal("cota_min_historica") != null ? c - refVal("cota_min_historica") : null,
+        vs_gen: refVal("cota_min_generacion") != null ? c - refVal("cota_min_generacion") : null,
+        trend_note: cota.last.note || null,
+      };
     }
     const vin = out.variables.caudal_entrante, vout = out.variables.caudal_saliente;
     out.balance = vin.available && vout.available

@@ -47,3 +47,10 @@ export function cssVar(v: string): string {
 }
 
 export const stationColor = (key: string) => cssVar(STATION_COLOR[key] || "var(--s1)");
+
+/** Desvío en metros -> "+45 cm" o "+1,62 m". */
+export const dev = (m: number | null | undefined) => {
+  if (m === null || m === undefined) return "—";
+  const a = Math.abs(m), sg = m > 0.005 ? "+" : m < -0.005 ? "−" : "±";
+  return a >= 1 ? `${sg}${a.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} m` : `${sg}${Math.round(a * 100)} cm`;
+};

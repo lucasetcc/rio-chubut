@@ -141,12 +141,12 @@ export default function App() {
         </section>
 
         <section>
-          <h2>Perfil de la cuenca <span className="hint">aguas arriba → aguas abajo · tiempos de viaje estimados entre estaciones</span></h2>
+          <h2>Perfil de la cuenca <span className="hint">aguas arriba → aguas abajo · cada estación comparada con su propio nivel normal · tiempos de viaje estimados</span></h2>
           <RiverProfile main={main} prop={prop} dam={dam} />
         </section>
 
         <section>
-          <h2>Estaciones principales <span className="hint">nivel medido · minigráfico de 7 días</span></h2>
+          <h2>Estaciones principales <span className="hint">número grande = desvío respecto de lo normal de esa estación · la lectura de escala no es profundidad</span></h2>
           <div className="chain">{main.map((s) => <StationCard key={s.key} s={s} />)}</div>
           <div className="grid g2" style={{ marginTop: 14 }}>
             <FloodPanel floods={floods} />
