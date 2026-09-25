@@ -1,0 +1,367 @@
+{
+  "_doc": "Catálogo inicial verificado contra https://alerta.ina.gob.ar/a5 el 24/09/2026. Los IDs se re-verifican automáticamente en cada sincronización de metadata (estación y variable deben coincidir o la serie se bloquea). 'chain_order' define el orden aguas arriba -> aguas abajo para la propagación. Coordenadas: se sobreescriben con las publicadas por el INA.",
+  "stations": [
+    {
+      "key": "alto_chubut",
+      "name": "Alto Chubut (Nacimiento)",
+      "river": "Río Chubut (cabecera)",
+      "kind": "hydro",
+      "main": false,
+      "chain_order": 1,
+      "ina_station_id": 6384,
+      "lat": -41.83,
+      "lon": -71.11,
+      "notes": "Estación de cabecera. Sin datos nuevos desde 29/06/2026 al momento de la verificación.",
+      "series": [
+        {
+          "id": 32923,
+          "role": "level",
+          "var_id": 2
+        },
+        {
+          "id": 32012,
+          "role": "rain",
+          "var_id": 27
+        }
+      ]
+    },
+    {
+      "key": "el_maiten",
+      "name": "El Maitén",
+      "river": "Río Chubut",
+      "kind": "hydro",
+      "main": true,
+      "chain_order": 2,
+      "ina_station_id": 2229,
+      "lat": -42.1,
+      "lon": -71.17,
+      "notes": "",
+      "series": [
+        {
+          "id": 6752,
+          "role": "level",
+          "var_id": 2
+        },
+        {
+          "id": 6790,
+          "role": "rain",
+          "var_id": 27
+        }
+      ]
+    },
+    {
+      "key": "tecka",
+      "name": "Tecka – Estancia Niedo",
+      "river": "Río Tecka (afluente, llega al Chubut vía Río Gualjaina)",
+      "kind": "hydro",
+      "main": false,
+      "chain_order": null,
+      "ina_station_id": 7385,
+      "lat": -43.35,
+      "lon": -70.88,
+      "notes": "Tributario. No está en la línea principal del Río Chubut.",
+      "series": [
+        {
+          "id": 37577,
+          "role": "level",
+          "var_id": 2
+        }
+      ]
+    },
+    {
+      "key": "gualjaina",
+      "name": "Gualjaina",
+      "river": "Río Chubut",
+      "kind": "hydro",
+      "main": true,
+      "chain_order": 3,
+      "ina_station_id": 6376,
+      "lat": -42.61,
+      "lon": -70.38,
+      "notes": "",
+      "series": [
+        {
+          "id": 34354,
+          "role": "level",
+          "var_id": 2
+        },
+        {
+          "id": 39103,
+          "role": "rain",
+          "var_id": 27
+        },
+        {
+          "id": 30006,
+          "role": "level_hist",
+          "var_id": 39,
+          "ina_station_id": 1986
+        }
+      ]
+    },
+    {
+      "key": "paso_del_sapo",
+      "name": "Paso del Sapo",
+      "river": "Río Chubut",
+      "kind": "hydro",
+      "main": true,
+      "chain_order": 4,
+      "ina_station_id": 7259,
+      "lat": -42.74,
+      "lon": -69.59,
+      "notes": "",
+      "series": [
+        {
+          "id": 36888,
+          "role": "level",
+          "var_id": 2
+        },
+        {
+          "id": 30031,
+          "role": "level_hist",
+          "var_id": 39,
+          "ina_station_id": 2011
+        }
+      ]
+    },
+    {
+      "key": "cerro_condor",
+      "name": "Cerro Cóndor",
+      "river": "Río Chubut",
+      "kind": "hydro",
+      "main": true,
+      "chain_order": 5,
+      "ina_station_id": 6386,
+      "lat": -43.42,
+      "lon": -69.16,
+      "notes": "",
+      "series": [
+        {
+          "id": 33676,
+          "role": "level",
+          "var_id": 2
+        }
+      ]
+    },
+    {
+      "key": "los_altares",
+      "name": "Los Altares",
+      "river": "Río Chubut",
+      "kind": "hydro",
+      "main": true,
+      "chain_order": 6,
+      "ina_station_id": 6608,
+      "lat": -43.89,
+      "lon": -68.4,
+      "notes": "",
+      "series": [
+        {
+          "id": 33064,
+          "role": "level",
+          "var_id": 2
+        },
+        {
+          "id": 34254,
+          "role": "rain",
+          "var_id": 27
+        },
+        {
+          "id": 30032,
+          "role": "level_hist",
+          "var_id": 39,
+          "ina_station_id": 2012
+        }
+      ]
+    },
+    {
+      "key": "las_plumas",
+      "name": "Las Plumas",
+      "river": "Río Chubut",
+      "kind": "hydro",
+      "main": true,
+      "chain_order": 7,
+      "ina_station_id": 7258,
+      "lat": -43.72,
+      "lon": -67.29,
+      "notes": "Última estación antes del embalse.",
+      "series": [
+        {
+          "id": 36886,
+          "role": "level",
+          "var_id": 2
+        }
+      ]
+    },
+    {
+      "key": "ameghino_abajo",
+      "name": "Ameghino (río aguas abajo del dique)",
+      "river": "Río Chubut",
+      "kind": "dam_outflow",
+      "main": false,
+      "chain_order": null,
+      "ina_station_id": 2181,
+      "lat": -43.698,
+      "lon": -66.475,
+      "notes": "Escala del río debajo del dique. NO es la cota del embalse. Refleja cualitativamente la erogación.",
+      "series": [
+        {
+          "id": 6924,
+          "role": "level",
+          "var_id": 2
+        },
+        {
+          "id": 30004,
+          "role": "level_hist",
+          "var_id": 39,
+          "ina_station_id": 1984
+        }
+      ]
+    },
+    {
+      "key": "rmet_paso_del_sapo",
+      "name": "RMET Paso del Sapo",
+      "river": "",
+      "kind": "rain",
+      "main": false,
+      "chain_order": null,
+      "ina_station_id": 8293,
+      "lat": -42.73,
+      "lon": -69.62,
+      "notes": "Estación meteorológica.",
+      "near_hydro": "paso_del_sapo",
+      "series": [
+        {
+          "id": 43788,
+          "role": "rain",
+          "var_id": 27
+        }
+      ]
+    },
+    {
+      "key": "rmet_las_plumas",
+      "name": "RMET Las Plumas",
+      "river": "",
+      "kind": "rain",
+      "main": false,
+      "chain_order": null,
+      "ina_station_id": 8286,
+      "lat": -43.72,
+      "lon": -67.29,
+      "notes": "Estación meteorológica.",
+      "near_hydro": "las_plumas",
+      "series": [
+        {
+          "id": 43745,
+          "role": "rain",
+          "var_id": 27
+        }
+      ]
+    },
+    {
+      "key": "norquinco",
+      "name": "Ñorquinco",
+      "river": "Río Chico – cuenca alta (afluente del Chubut, Río Negro)",
+      "kind": "hydro",
+      "main": false,
+      "chain_order": null,
+      "ina_station_id": 6640,
+      "lat": -41.842,
+      "lon": -70.891,
+      "notes": "Tributario. No está en la línea principal del Río Chubut. Datos desde 09/2024.",
+      "series": [
+        {
+          "id": 33516,
+          "role": "level",
+          "var_id": 2
+        },
+        {
+          "id": 33920,
+          "role": "rain",
+          "var_id": 27
+        }
+      ]
+    },
+    {
+      "key": "gualjaina_rio",
+      "name": "Río Gualjaina (Gualjaina)",
+      "river": "Río Gualjaina (afluente, llega al Chubut en Gualjaina)",
+      "kind": "hydro",
+      "main": false,
+      "chain_order": null,
+      "ina_station_id": 2606,
+      "lat": -42.65,
+      "lon": -70.44,
+      "notes": "Tributario (recibe al Tecka y al Lepá). El INA no informa el río de esta estación: 'Río Gualjaina' se deduce del nombre ('Gualjaina - Gualjaina') y de la ubicación. No es la estación del Río Chubut en Gualjaina.",
+      "series": [
+        {
+          "id": 8242,
+          "role": "level",
+          "var_id": 2
+        },
+        {
+          "id": 8821,
+          "role": "rain",
+          "var_id": 27
+        }
+      ]
+    },
+    {
+      "key": "chico_ameghino",
+      "name": "Río Chico – Ameghino",
+      "river": "Río Chico (afluente, desemboca en el embalse Ameghino)",
+      "kind": "hydro",
+      "main": false,
+      "chain_order": null,
+      "ina_station_id": 7257,
+      "lat": -44.477,
+      "lon": -66.912,
+      "notes": "Tributario del embalse, casi siempre seco. El INA solo tiene 6 días de datos (junio 2025).",
+      "series": [
+        {
+          "id": 36883,
+          "role": "level",
+          "var_id": 2
+        }
+      ]
+    }
+  ],
+  "discovery": {
+    "search_terms": [
+      "Chubut",
+      "Tecka",
+      "Gualjaina",
+      "Chico",
+      "Ameghino",
+      "Maiten",
+      "Paso del Sapo",
+      "Los Altares",
+      "Las Plumas",
+      "Cerro Condor",
+      "Norquinco"
+    ],
+    "exclude_station_ids": [
+      8240,
+      8258,
+      6643,
+      1614,
+      1615,
+      1628,
+      8244,
+      1583,
+      1453,
+      2126,
+      2152,
+      6301,
+      6570,
+      2024,
+      1985,
+      1572
+    ],
+    "exclude_reason": "Otras cuencas (Carrenleufú, Senguer, meseta norte, costa) o aguas abajo del dique (Valle Inferior, Trelew).",
+    "bbox": {
+      "min_lat": -44.6,
+      "max_lat": -41.5,
+      "min_lon": -71.8,
+      "max_lon": -66.3
+    }
+  }
+}

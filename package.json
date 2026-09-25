@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@netlify/blobs": "^11.1.1",
-    "echarts": "^5.6.0",
+    "echarts": "^6.1.0",
     "echarts-for-react": "^3.0.2",
     "leaflet": "^1.9.4",
     "react": "^18.3.1",
