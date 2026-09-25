@@ -79,11 +79,10 @@ function buildCatalog() {
   S.stations = base;
 }
 
-function flag(role: string, v: number | null, prev: number | null): [Quality, string?] {
+function flag(role: string, v: number | null): [Quality, string?] {
   if (v === null || Number.isNaN(v)) return ["MISSING", "valor nulo en la fuente"];
   if (role === "level" || role === "level_hist") {
     if (v < CFG.levelMin || v > CFG.levelMax) return ["SUSPECT", "valor fuera de rango físico"];
-    if (prev !== null && Math.abs(v - prev) > CFG.suspectJumpM) return ["SUSPECT", `salto anormal de ${(v - prev).toFixed(2)} m`];
   }
   if (role === "rain" && (v < 0 || v > CFG.rainMaxStep)) return ["SUSPECT", "valor de lluvia imposible"];
   return ["VALID"];
@@ -153,17 +152,38 @@ async function loadSeries(st: SeriesState) {
   }
   parsed.sort((a, b) => a.t - b.t);
   const obs: Obs[] = [];
-  let prev: number | null = null;
   for (const p of parsed) {
     const last = obs[obs.length - 1];
     if (last && last.t === p.t) {
       if (last.v !== p.v) st.issues.push({ ts: iso(p.t), issue: "duplicate_ts", detail: `timestamp repetido con valores ${last.v} y ${p.v}` });
       continue;
     }
-    const [q, note] = flag(def.role, p.v, prev);
-    if (q === "SUSPECT") st.issues.push({ ts: iso(p.t), issue: note!.startsWith("salto") ? "jump" : "impossible", detail: `${note} (${p.v})` });
+    const [q, note] = flag(def.role, p.v);
+    if (q === "SUSPECT") st.issues.push({ ts: iso(p.t), issue: "impossible", detail: `${note} (${p.v})` });
     obs.push({ t: p.t, v: p.v, q, note });
-    if (q === "VALID") prev = p.v;
+  }
+  // Saltos: sólo se marca SUSPECT un pico aislado (sube y vuelve, o baja y vuelve, en pasos consecutivos
+  // de ≤48 h). Un escalón que se mantiene (crecida real o cambio de cero de escala) NO se descarta:
+  // queda registrado como aviso de calidad.
+  if (def.role === "level" || def.role === "level_hist") {
+    const th = CFG.suspectJumpM;
+    const ok = obs.filter((o) => o.q === "VALID");
+    for (let i = 1; i < ok.length; i++) {
+      const a = ok[i - 1], b = ok[i], c = ok[i + 1];
+      const d1 = (b.v as number) - (a.v as number);
+      if (Math.abs(d1) <= th) continue;
+      const near = (b.t - a.t) <= 48 * H;
+      if (c && near && (c.t - b.t) <= 48 * H) {
+        const d2 = (c.v as number) - (b.v as number);
+        if (Math.abs(d2) > th && Math.sign(d2) !== Math.sign(d1)) {
+          b.q = "SUSPECT"; b.note = `pico aislado de ${d1 > 0 ? "+" : ""}${d1.toFixed(2)} m`;
+          st.issues.push({ ts: iso(b.t), issue: "jump", detail: `${b.note} (${b.v})` });
+          i++; // el regreso después del pico no es un escalón
+          continue;
+        }
+      }
+      st.issues.push({ ts: iso(b.t), issue: "level_shift", detail: `escalón de ${d1 > 0 ? "+" : ""}${d1.toFixed(2)} m ${near ? "" : `tras ${Math.round((b.t - a.t) / D)} días sin datos `}(crecida real o posible cambio de cero de escala)` });
+    }
   }
   st.obs = obs;
   st.error = undefined;
