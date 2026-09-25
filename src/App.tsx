@@ -9,6 +9,7 @@ import { S } from "./data/engine";
 import { ago, fDateTime } from "./fmt";
 
 // Pestañas pesadas (gráficos, mapa, admin) se cargan recién cuando se abren
+const StationDetail = lazy(() => import("./components/StationDetail").then((m) => ({ default: m.StationDetail })));
 const LevelChart = lazy(() => import("./components/Charts").then((m) => ({ default: m.LevelChart })));
 const StatsPanel = lazy(() => import("./components/StatsPanel").then((m) => ({ default: m.StatsPanel })));
 const RainPanel = lazy(() => import("./components/RainPanel").then((m) => ({ default: m.RainPanel })));
@@ -48,6 +49,8 @@ export default function App() {
   const [status, setStatus] = useState<any>(null);
   const [rain, setRain] = useState<any>(null);
   const [prop, setProp] = useState<any>(null);
+  const [detail, setDetail] = useState<string | null>(null);
+  const closeDetail = useCallback(() => setDetail(null), []);
   const [floods, setFloods] = useState<any[]>([]);
   const [dam, setDam] = useState<any>(null);
   const [alerts, setAlerts] = useState<any[]>([]);
@@ -170,15 +173,15 @@ export default function App() {
           </section>
           <section>
             <h2>El río, de la cabecera al dique <span className="hint">cada estación comparada con su propio nivel normal</span></h2>
-            <RiverProfile main={main} prop={prop} dam={dam} />
+            <RiverProfile main={main} prop={prop} dam={dam} onOpen={setDetail} />
           </section>
           <section>
             <h2>Estaciones <span className="hint">número grande = lectura de la regla de cada estación (no es profundidad ni se compara entre estaciones)</span></h2>
-            <div className="chain">{main.map((s) => <StationCard key={s.key} s={s} />)}</div>
+            <div className="chain">{main.map((s) => <StationCard key={s.key} s={s} onOpen={setDetail} />)}</div>
           </section>
           {tribs.length > 0 && <section>
             <h2>Afluentes <span className="hint">ríos que desembocan en el Chubut (o en el embalse); anticipan lo que puede llegar</span></h2>
-            <div className="chain">{tribs.map((s) => <StationCard key={s.key} s={s} />)}</div>
+            <div className="chain">{tribs.map((s) => <StationCard key={s.key} s={s} onOpen={setDetail} />)}</div>
           </section>}
           <section>
             <div className="grid g2">
@@ -260,6 +263,11 @@ export default function App() {
           <span>No es un sistema oficial de alerta. Las propagaciones son estimaciones estadísticas.</span>
         </div>
       </footer>
+      {detail && stations.find((x) => x.key === detail) && (
+        <Suspense fallback={null}>
+          <StationDetail s={stations.find((x) => x.key === detail)!} prop={prop} fc={fc} onClose={closeDetail} />
+        </Suspense>
+      )}
     </>
   );
 }

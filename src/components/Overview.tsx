@@ -50,7 +50,7 @@ export function Kpis({ status, main, rain, alerts }: { status: any; main: Statio
 }
 
 /** Perfil esquemático: estaciones de aguas arriba a aguas abajo, terminando en el dique. */
-export function RiverProfile({ main, prop, dam }: { main: Station[]; prop: any; dam: any }) {
+export function RiverProfile({ main, prop, dam, onOpen }: { main: Station[]; prop: any; dam: any; onOpen?: (k: string) => void }) {
   const nodes = main;
   const n = nodes.length + 1;
   const W = 1000, padX = 60, y0 = 78;
@@ -100,7 +100,8 @@ export function RiverProfile({ main, prop, dam }: { main: Station[]; prop: any; 
           const c = cssVar(STATUS_VAR[s.status?.code || ""] || "var(--stale)");
           const d24 = s.level?.changes["24h"]?.delta_m;
           return (
-            <g key={s.key}>
+            <g key={s.key} className={onOpen ? "pnode" : undefined} onClick={onOpen ? () => onOpen(s.key) : undefined}>
+              <rect x={xs[i] - 70} y={10} width={140} height={150} fill="transparent" />
               <text x={xs[i]} y={30} textAnchor="middle" className="lbl">{s.name}</text>
               <circle cx={xs[i]} cy={y0} r={11} fill={cssVar("var(--panel)")} stroke={c} strokeWidth={3} />
               <circle cx={xs[i]} cy={y0} r={4.5} fill={stationColor(s.key)} />

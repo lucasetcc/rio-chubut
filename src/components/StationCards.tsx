@@ -75,14 +75,15 @@ function SourceState({ s }: { s: Station }) {
   return <div className="state nodata">Sin datos de nivel en los últimos 45 días.</div>;
 }
 
-export function StationCard({ s }: { s: Station }) {
+export function StationCard({ s, onOpen }: { s: Station; onOpen?: (k: string) => void }) {
   const lv = s.level;
   const ch = lv?.changes || {};
   const tr = s.status?.trend;
   const stale = s.status?.code === "stale";
   const color = stationColor(s.key);
   return (
-    <div className={`st-card ${stale ? "is-stale" : ""}`} style={{ ["--status" as any]: STATUS_VAR[s.status?.code || ""] || "var(--stale)" }}>
+    <div className={`st-card ${stale ? "is-stale" : ""} ${onOpen ? "clickable" : ""}`} style={{ ["--status" as any]: STATUS_VAR[s.status?.code || ""] || "var(--stale)" }}
+      {...(onOpen ? { role: "button", tabIndex: 0, title: `Ver detalle de ${s.name}`, onClick: () => onOpen(s.key), onKeyDown: (e: any) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(s.key); } } } : {})}>
       <div className="head">
         <h3><span className="swatch" style={{ background: color }} />{s.name}</h3>
         <StatusBadge s={s.status} />
@@ -105,10 +106,11 @@ export function StationCard({ s }: { s: Station }) {
           </div>
           <div className="foot">
             <span>Umbral oficial: {s.status?.manual_threshold_m != null ? `${num(s.status.manual_threshold_m)} m (cargado)` : "no disponible"}</span>
-            <a href={s.source.url} target="_blank" rel="noreferrer">INA ↗</a>
+            <a href={s.source.url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>INA ↗</a>
           </div>
         </>
       ) : <SourceState s={s} />}
+      {onOpen && <div className="open-hint">Ver detalle →</div>}
     </div>
   );
 }

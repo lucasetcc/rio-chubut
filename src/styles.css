@@ -242,3 +242,25 @@ nav.sections a.on { background: var(--accent-soft); color: var(--text); }
 .state.err { color: var(--fall); }
 .state.small { font-size: 11.5px; margin-top: 6px; padding: 5px 8px; }
 .warn-text { color: var(--warn, #d99400); }
+
+/* tarjetas clicables + panel de detalle */
+.st-card.clickable { cursor: pointer; transition: border-color .15s, transform .15s, box-shadow .15s; }
+.st-card.clickable:hover, .st-card.clickable:focus-visible { border-color: var(--accent); transform: translateY(-2px); box-shadow: 0 6px 22px rgba(0,0,0,.25); outline: none; }
+.st-card .open-hint { font-size: 11.5px; color: var(--accent); margin-top: 8px; opacity: 0; transition: opacity .15s; }
+.st-card.clickable:hover .open-hint, .st-card.clickable:focus-visible .open-hint { opacity: 1; }
+@media (hover: none) { .st-card .open-hint { opacity: .8; } }
+.pnode { cursor: pointer; }
+.pnode:hover .lbl { fill: var(--accent); }
+.modal-bg { position: fixed; inset: 0; background: rgba(4,8,12,.62); z-index: 1000; display: flex; justify-content: center; align-items: flex-start; padding: 32px 16px; overflow-y: auto; }
+.modal { background: var(--bg); border: 1px solid var(--line); border-radius: 14px; width: min(1100px, 100%); padding: 18px; box-shadow: 0 20px 60px rgba(0,0,0,.45); }
+.modal-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+.modal-head .close { font-size: 18px; line-height: 1; padding: 6px 10px; }
+.modal .card h4 { margin-top: 0; }
+.big-detail { font-size: 44px; font-weight: 750; letter-spacing: -.02em; line-height: 1.05; }
+.big-detail small { font-size: 18px; color: var(--muted); font-weight: 500; }
+.fc-strip { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; }
+.fc-strip div { background: var(--panel-2); border-radius: 8px; padding: 6px 2px; text-align: center; min-width: 0; }
+.fc-strip span { display: block; font-size: 10.5px; color: var(--muted); text-transform: uppercase; }
+.fc-strip b { display: block; font-size: 14px; }
+.fc-strip small { font-size: 10.5px; color: var(--muted); }
+@media (max-width: 640px) { .modal-bg { padding: 0; } .modal { border-radius: 0; min-height: 100%; padding: 14px; } .big-detail { font-size: 36px; } }
