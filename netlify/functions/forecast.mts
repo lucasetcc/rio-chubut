@@ -5,10 +5,13 @@
  */
 import type { Config } from "@netlify/functions";
 import seed from "../../src/data/stations.json";
+import { okBucket } from "../lib/validate";
 
-const KEYS = ["alto_chubut", "el_maiten", "tecka", "gualjaina", "paso_del_sapo", "cerro_condor", "los_altares", "las_plumas"];
+const KEYS = ["alto_chubut", "norquinco", "el_maiten", "tecka", "gualjaina", "paso_del_sapo", "cerro_condor", "los_altares", "las_plumas"];
 
-export default async () => {
+export default async (req: Request) => {
+  const bucket = new URL(req.url).pathname.split("/").filter(Boolean)[2];
+  if (!okBucket(bucket, 1800e3)) return new Response(JSON.stringify({ error: "bucket inválido" }), { status: 400, headers: { "content-type": "application/json", "cache-control": "no-store", "netlify-cdn-cache-control": "no-store" } });
   const st = (seed as any).stations.filter((s: any) => KEYS.includes(s.key));
   const url = "https://api.open-meteo.com/v1/forecast?" + new URLSearchParams({
     latitude: st.map((s: any) => s.lat.toFixed(3)).join(","),

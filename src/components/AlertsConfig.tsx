@@ -4,31 +4,26 @@ import { ago, fDateTime, isoDaysAgo } from "../fmt";
 
 export function AlertsPanel({ alerts, reload }: { alerts: any[]; reload: () => void }) {
   const active = alerts.filter((a) => !a.cleared_at);
-  const past = alerts.filter((a) => a.cleared_at).slice(0, 20);
   return (
     <div className="card">
-      {active.length === 0 ? <div className="msg info">No hay alertas activas.</div> : active.map((a) => (
+      <div className="msg info small" style={{ marginTop: 0 }}>
+        Estos indicadores son <b>reglas propias, no oficiales</b> (no existen umbrales oficiales públicos de alerta para estas estaciones).
+        Se evalúan cada vez que se carga la página y sólo con datos de menos de 24 h.
+      </div>
+      {active.length === 0 ? <div className="msg info">Ningún indicador activo.</div> : active.map((a) => (
         <div key={a.id} className={`msg ${a.type === "rise" || a.type === "propagation" ? "warn" : ""}`} style={{ opacity: a.acknowledged ? 0.6 : 1 }}>
           <div className="row">
             <b>{a.message}</b><span className="spacer" />
             {!a.acknowledged && <button className="small" onClick={async () => { await api.ack(a.id); reload(); }}>Visto</button>}
           </div>
-          <div className="small muted">Dato: {a.data_local || "—"} · regla: {a.rule_description}</div>
+          <div className="small muted">Dato: {a.data_local || "—"} ART · regla: {a.rule_description}</div>
         </div>
       ))}
-      {past.length > 0 && (
-        <details style={{ marginTop: 10 }}>
-          <summary>Historial ({past.length})</summary>
-          <table style={{ marginTop: 6 }}><tbody>
-            {past.map((a) => <tr key={a.id}><td className="small">{a.triggered_local} → {a.cleared_local}</td><td className="small">{a.message}</td></tr>)}
-          </tbody></table>
-        </details>
-      )}
     </div>
   );
 }
 
-const TYPE_LABEL: Record<string, string> = { rise: "Subida", above_avg: "Sobre promedio", trend: "Tendencia", propagation: "Señal aguas arriba", rain: "Lluvia", stale: "Sin actualizar" };
+const TYPE_LABEL: Record<string, string> = { rise: "Subida", above_avg: "Claramente sobre promedio", trend: "Tendencia", propagation: "Señal aguas arriba", rain: "Lluvia", stale: "Sin actualizar" };
 const PARAM_LABEL: Record<string, string> = { cm: "cm", hours: "horas", days: "días", mm: "mm", direction: "" };
 
 function RuleRow({ rule, types, stations, onSaved }: { rule: any; types: any; stations: Station[]; onSaved: () => void }) {
@@ -102,19 +97,24 @@ export function ConfigPanel({ stations, reloadAll }: { stations: Station[]; relo
       </div>
 
       <div className="card tablewrap">
-        <h4 style={{ margin: "0 0 8px", fontSize: 13 }}>Umbral manual de “crecida importante” (🔴)</h4>
+        <h4 style={{ margin: "0 0 8px", fontSize: 13 }}>Umbral oficial por estación</h4>
         <div className="small muted" style={{ marginBottom: 8 }}>
-          Sin umbral manual, 🔴 se activa sólo si el nivel supera el P90 de los promedios diarios históricos (con ≥365 días de historia) y está subiendo.
-          Si tenés un umbral oficial (p.ej. de Defensa Civil o el IPA), cargalo acá.
+          No hay umbrales oficiales públicos para estas estaciones. Si un organismo publica uno (INA, IPA, Defensa Civil), cargalo con su fuente y su link:
+          la estación se marca “SOBRE UMBRAL” cuando lo supera. Sin fuente no se guarda.
         </div>
         <table><tbody>
           {hydro.map((s) => (
             <tr key={s.key}>
               <td>{s.name}</td>
-              <td className="small muted">P90 hist.: {s.stats_brief?.p90_hist != null && s.stats_brief.history_days >= 365 ? `${s.stats_brief.p90_hist.toFixed(2)} m` : "historia insuficiente"}</td>
+              <td className="small muted">{th[s.key] ? `${th[s.key].crecida_m} m · ${th[s.key].source}` : "sin umbral oficial"}</td>
               <td>
-                <form key={`${s.key}:${th[s.key]?.crecida_m ?? ""}`} className="inline" onSubmit={async (e) => { e.preventDefault(); const v = (e.currentTarget.elements.namedItem("v") as HTMLInputElement).value; try { setTh(await api.setThreshold(s.key, v)); reloadAll(); } catch (x) { alert(String(x)); } }}>
-                  <input name="v" defaultValue={th[s.key]?.crecida_m ?? ""} placeholder="m (vacío = sin umbral)" style={{ width: 150 }} />
+                <form key={`${s.key}:${th[s.key]?.crecida_m ?? ""}`} className="inline" onSubmit={async (e) => {
+                  e.preventDefault(); const f = e.currentTarget.elements;
+                  const val = (n: string) => (f.namedItem(n) as HTMLInputElement).value;
+                  try { setTh(await api.setThreshold(s.key, val("v"), val("src"), val("url"))); reloadAll(); } catch (x) { alert(String(x)); } }}>
+                  <input name="v" defaultValue={th[s.key]?.crecida_m ?? ""} placeholder="m (vacío = quitar)" style={{ width: 120 }} />
+                  <input name="src" defaultValue={th[s.key]?.source ?? ""} placeholder="Fuente (organismo)" style={{ width: 160 }} />
+                  <input name="url" defaultValue={th[s.key]?.url ?? ""} placeholder="https://…" style={{ width: 180 }} />
                   <button className="small">Guardar</button>
                 </form>
               </td>
@@ -138,7 +138,7 @@ export function ConfigPanel({ stations, reloadAll }: { stations: Station[]; relo
               {disc.candidates.map((c: any) => (
                 <tr key={c.series_id}>
                   <td>{c.station_name} <span className="small muted">(#{c.ina_station_id}, {c.lat?.toFixed(2)}, {c.lon?.toFixed(2)})</span></td>
-                  <td><a href={c.source_url} target="_blank" rel="noreferrer">{c.series_id} ↗</a></td>
+                  <td><a href={`https://alerta.ina.gob.ar/a5/secciones?seriesId=${Number(c.series_id)}&tipo=puntual`} target="_blank" rel="noreferrer">{c.series_id} ↗</a></td>
                   <td>{c.var_code} – {c.var_name} ({c.unit})</td>
                   <td className="small">{c.timestart?.slice(0, 10)} → {c.timeend?.slice(0, 10)} · {c.count ?? "?"} · {c.availability}</td>
                   <td>{c.status}</td>
@@ -182,7 +182,6 @@ export function ExportPanel({ stations }: { stations: Station[] }) {
         <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /> a
         <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
         <button onClick={() => go("csv")}>CSV</button>
-        <button onClick={() => go("xlsx")}>Excel</button>
         <button onClick={() => go("json")}>JSON</button>
         {msg && <span className="small muted">{msg}</span>}
       </div>
@@ -206,7 +205,7 @@ export function SystemPanel({ status }: { status: any }) {
             <tr key={s.id}>
               <td><a href={s.source_url} target="_blank" rel="noreferrer">{s.id} ↗</a></td>
               <td>{s.station_key}</td><td>{s.role}</td>
-              <td className={s.verify_status === "ok" ? "" : "err"}>{s.verify_status}{s.verify_detail ? ` – ${s.verify_detail}` : ""}</td>
+              <td className={s.verify_status === "ok" ? "" : s.verify_status === "se carga al abrir el histórico" ? "muted" : "err"}>{s.verify_status}{s.verify_detail ? ` – ${s.verify_detail}` : ""}</td>
               <td className={s.stale ? "stale-note" : ""}>{s.last_obs_local || "—"}{s.age_hours != null && ` (${ago(s.last_obs_ts)})`}</td>
               <td className="small">{s.last_fetch_at ? fDateTime(s.last_fetch_at) : "—"} {s.last_fetch_status === "error" && <span className="err">{s.last_error}</span>}</td>
             </tr>

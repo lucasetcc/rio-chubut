@@ -37,7 +37,7 @@ export const isoDaysAgo = (d: number) => new Date(Date.now() - d * 864e5).toISOS
 /** Colores fijos por estación (color sigue a la entidad, nunca al orden). */
 export const STATION_COLOR: Record<string, string> = {
   gualjaina: "var(--s1)", paso_del_sapo: "var(--s2)", cerro_condor: "var(--s3)", los_altares: "var(--s4)",
-  las_plumas: "var(--s5)", el_maiten: "var(--s6)", tecka: "var(--s7)", alto_chubut: "var(--s8)", ameghino_abajo: "var(--muted)",
+  las_plumas: "var(--s5)", el_maiten: "var(--s6)", tecka: "var(--s7)", alto_chubut: "var(--s8)", norquinco: "#c9a227", gualjaina_rio: "#3fb6c9", chico_ameghino: "#a0703a", ameghino_abajo: "var(--muted)",
 };
 
 export function cssVar(v: string): string {
@@ -54,3 +54,15 @@ export const dev = (m: number | null | undefined) => {
   const a = Math.abs(m), sg = m > 0.005 ? "+" : m < -0.005 ? "−" : "±";
   return a >= 1 ? `${sg}${a.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} m` : `${sg}${Math.round(a * 100)} cm`;
 };
+
+/** Sólo URLs http/https (evita javascript: y similares). */
+export const safeUrl = (u?: string | null): string | null => {
+  if (!u) return null;
+  try { const x = new URL(String(u)); return x.protocol === "https:" || x.protocol === "http:" ? x.href : null; } catch { return null; }
+};
+
+/** Escapa texto para tooltips HTML (ECharts arma HTML con strings). */
+export const esc = (t: unknown) => String(t ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+
+/** Fecha y hora con "ART" explícito. */
+export const fDateTimeArt = (iso?: string | null) => (iso ? `${fDateTime(iso)} ART` : "—");

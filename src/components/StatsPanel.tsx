@@ -1,7 +1,7 @@
-import ReactECharts from "echarts-for-react";
+import ReactECharts from "./EChart";
 import { useEffect, useState } from "react";
 import { api, Station, Stats } from "../api";
-import { cm, cssVar, fDate, fDateTime, num } from "../fmt";
+import { cm, cssVar, esc, fDate, fDateTime, num } from "../fmt";
 
 const WIN_LABEL: Record<string, string> = {
   "24h": "Últimas 24 h (datos crudos)", "7d": "Últimos 7 días completos", "7d_incl_hoy": "7 días incl. hoy (parcial)",
@@ -22,7 +22,7 @@ export function StatsPanel({ stations, selected, onSelect }: { stations: Station
   const name = hydro.find((s) => s.key === selected)?.name;
 
   const cmpKeys = ["7d", "30d", "90d", "365d", "historico", "mismo_mes_hist"] as const;
-  const cmpLabel: Record<string, string> = { "7d": "7 días", "30d": "30 días", "90d": "90 días", "365d": "12 meses", historico: "Histórico", mismo_mes_hist: "Mismo mes (años ant.)" };
+  const cmpLabel: Record<string, string> = { "7d": "7 días", "30d": "30 días", "90d": "90 días", "365d": "12 meses", historico: "Histórico", mismo_mes_hist: "Mediana mismo mes" };
   const cmpData = st?.available ? cmpKeys.map((k) => ({ k, v: st.comparisons[k] })).filter((x) => x.v != null) : [];
   const pos = cssVar("var(--pos)"), neg = cssVar("var(--neg)");
   const option = {
@@ -31,7 +31,7 @@ export function StatsPanel({ stations, selected, onSelect }: { stations: Station
     xAxis: { type: "value", axisLabel: { color: cssVar("var(--muted)"), formatter: (v: number) => `${Math.round(v * 100)} cm` }, splitLine: { lineStyle: { color: cssVar("var(--line)") } } },
     yAxis: { type: "category", inverse: true, data: cmpData.map((x) => cmpLabel[x.k]), axisLabel: { color: cssVar("var(--text-2)") }, axisLine: { lineStyle: { color: cssVar("var(--line)") } }, axisTick: { show: false } },
     tooltip: { trigger: "item", backgroundColor: cssVar("var(--panel)"), borderColor: cssVar("var(--line)"), textStyle: { color: cssVar("var(--text)") },
-      formatter: (p: any) => `Actual vs promedio ${p.name}: <b>${cm(p.value)}</b>` },
+      formatter: (p: any) => `Actual vs promedio ${esc(p.name)}: <b>${cm(p.value)}</b>` },
     series: [{
       type: "bar", barWidth: 14,
       data: cmpData.map((x) => ({ value: x.v, itemStyle: { color: (x.v as number) >= 0 ? pos : neg, borderRadius: (x.v as number) >= 0 ? [0, 4, 4, 0] : [4, 0, 0, 4] } })),
@@ -54,15 +54,15 @@ export function StatsPanel({ stations, selected, onSelect }: { stations: Station
         {st?.available && (
           <>
             <div style={{ fontSize: 15, lineHeight: 1.8 }}>
-              <div>Nivel actual: <b>{num(st.current.value)} m</b> <span className="small muted">({fDateTime(st.current.ts)})</span></div>
+              <div>Lectura de escala: <b>{num(st.current.value)} m</b> <span className="small muted">({fDateTime(st.current.ts)} ART · medido INA)</span></div>
               <div>Promedio de hoy (parcial): <b>{num(st.today_mean)} m</b></div>
-              <div>Promedio últimos 7 días: <b>{num(st.windows["7d"].mean)} m</b> <span className="small muted">· incl. hoy {num(st.windows["7d_incl_hoy"].mean)} m</span></div>
-              <div>Promedio últimos 30 días: <b>{num(st.windows["30d"].mean)} m</b></div>
-              <div>Diferencia respecto al promedio de 30 días: <b className={(st.comparisons["30d"] || 0) >= 0 ? "up" : "down"}>{cm(st.comparisons["30d"])}</b></div>
-              {st.same_month_climatology.mean != null ? (
-                <div>Promedio histórico de {MONTHS[st.same_month_climatology.month - 1]} ({st.same_month_climatology.years.join(", ")}): <b>{num(st.same_month_climatology.mean)} m</b> → actual {cm(st.comparisons.mismo_mes_hist)}</div>
-              ) : <div className="muted">Sin años anteriores de {MONTHS[st.same_month_climatology.month - 1]} para comparar.</div>}
-              {st.percentile_rank_hist != null && <div>El nivel actual supera al <b>{num(st.percentile_rank_hist, 0)} %</b> de los promedios diarios históricos.</div>}
+              <div>Promedio últimos 7 días: {st.windows["7d"].mean == null ? <span className="nodata">datos insuficientes ({st.windows["7d"].days_with_data}/7 días)</span> : <b>{num(st.windows["7d"].mean)} m</b>}</div>
+              <div>Promedio últimos 30 días: {st.windows["30d"].mean == null ? <span className="nodata">datos insuficientes ({st.windows["30d"].days_with_data}/30 días)</span> : <b>{num(st.windows["30d"].mean)} m</b>}</div>
+              {st.comparisons["30d"] != null && <div>Diferencia respecto al promedio de 30 días: <b>{cm(st.comparisons["30d"])}</b></div>}
+              {(st.same_month_climatology as any).ok ? (
+                <div>Mediana de {MONTHS[st.same_month_climatology.month - 1]} ({st.same_month_climatology.years.join(", ")}): <b>{num(st.same_month_climatology.median)} m</b> → actual {cm(st.comparisons.mismo_mes_hist)} · percentil <b>{num(st.percentile_rank_hist, 0)}</b></div>
+              ) : <div className="muted">Sin comparación con años anteriores: {(st.same_month_climatology as any).reason}.</div>}
+              <div className="small muted">Todo lo de esta sección es CALCULADO a partir de las lecturas del INA.</div>
             </div>
             <h4 style={{ margin: "14px 0 4px", fontSize: 13 }}>Diferencia del nivel actual respecto de cada promedio</h4>
             {cmpData.length ? <ReactECharts option={option} notMerge style={{ height: 36 * cmpData.length + 40 }} /> : <div className="nodata">Sin datos suficientes.</div>}

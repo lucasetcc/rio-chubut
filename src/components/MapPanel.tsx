@@ -4,7 +4,7 @@ import { CircleMarker, LayersControl, MapContainer, Marker, Polyline, Popup, Til
 import { Station } from "../api";
 import { ago, cm, cssVar, fDateTime, num } from "../fmt";
 
-const STATUS_COLOR: Record<string, string> = { stable: "var(--ok)", rising: "var(--rise)", falling: "var(--fall)", flood: "var(--flood)" };
+const STATUS_COLOR: Record<string, string> = { stable: "var(--ok)", rising: "var(--rise)", falling: "var(--neutral)", over: "var(--flood)" };
 
 const rainIcon = L.divIcon({ className: "", html: `<div style="width:12px;height:12px;background:#5aa0ff;border:2px solid #fff;transform:rotate(45deg);box-shadow:0 0 0 1px #0006"></div>`, iconSize: [12, 12], iconAnchor: [6, 6] });
 const damIcon = L.divIcon({ className: "", html: `<div style="width:18px;height:18px;border-radius:4px;background:#222;border:2px solid #fff;color:#fff;font:700 11px/14px sans-serif;text-align:center;box-shadow:0 0 0 1px #0008">D</div>`, iconSize: [18, 18], iconAnchor: [9, 9] });
@@ -48,7 +48,7 @@ export function MapPanel({ stations, rain, dam }: { stations: Station[]; rain: a
                 <Popup>
                   <b>{s.name}</b> <span style={{ opacity: 0.7 }}>({s.river})</span><br />
                   {s.status?.emoji} {s.status?.label}{s.status?.trend?.cm_per_day != null ? ` · ${num(s.status.trend.cm_per_day, 1)} cm/día` : ""}<br />
-                  Nivel: <b>{s.level ? `${num(s.level.value)} m` : "sin datos"}</b>{s.level ? ` (24 h: ${cm(s.level.changes["24h"]?.delta_m)})` : ""}<br />
+                  Lectura de escala: <b>{s.level ? `${num(s.level.value)} m` : "sin datos"}</b> <span style={{ opacity: 0.7 }}>(no es profundidad)</span>{s.level ? ` (24 h: ${cm(s.level.changes["24h"]?.delta_m)})` : ""}<br />
                   Caudal: <i>sin datos públicos</i><br />
                   {rainLine(r)}<br />
                   Última actualización: {s.level ? `${fDateTime(s.level.ts)} (${ago(s.level.ts)})` : "—"}<br />
@@ -71,7 +71,7 @@ export function MapPanel({ stations, rain, dam }: { stations: Station[]; rain: a
             <Tooltip direction="top" offset={[0, -8]}>Dique Florentino Ameghino</Tooltip>
             <Popup>
               <b>Dique Florentino Ameghino</b><br />
-              Cota: {dam?.variables?.cota?.available ? `${num(dam.variables.cota.last.value)} m (MANUAL, ${dam.variables.cota.last.ts_local})` : "sin datos públicos disponibles"}<br />
+              Cota: {dam?.variables?.cota?.available ? `${num(dam.variables.cota.last.value, dam.variables.cota.last.approx ? 0 : 2)} m${dam.variables.cota.last.approx ? " aprox." : ""} (${dam.variables.cota.last.quality}, ${dam.variables.cota.last.ts_local}, hace ${Math.round(dam.variables.cota.age_days)} días)` : "sin datos públicos disponibles"}<br />
               Escala del río aguas abajo (INA): ver estación “Ameghino (río aguas abajo del dique)”.
             </Popup>
           </Marker>
@@ -80,8 +80,8 @@ export function MapPanel({ stations, rain, dam }: { stations: Station[]; rain: a
       <div className="legend-map">
         <span><span style={{ color: cssVar("var(--ok)") }}>●</span> estable</span>
         <span><span style={{ color: cssVar("var(--rise)") }}>●</span> subiendo</span>
-        <span><span style={{ color: cssVar("var(--fall)") }}>●</span> bajando</span>
-        <span><span style={{ color: cssVar("var(--flood)") }}>●</span> crecida importante</span>
+        <span><span style={{ color: cssVar("var(--neutral)") }}>●</span> bajando</span>
+        <span><span style={{ color: cssVar("var(--flood)") }}>●</span> sobre umbral cargado</span>
         <span><span style={{ color: cssVar("var(--stale)") }}>●</span> sin actualizar</span>
         <span>◆ pluviómetro</span><span>D dique</span><span>- - conexión esquemática</span>
       </div>

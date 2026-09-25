@@ -1,7 +1,7 @@
-import ReactECharts from "echarts-for-react";
+import ReactECharts from "./EChart";
 import { useEffect, useMemo, useState } from "react";
 import { api, Station } from "../api";
-import { cssVar, dev, fDate, fDateTime, isoDaysAgo, num, stationColor } from "../fmt";
+import { cssVar, dev, esc, fDate, fDateTime, isoDaysAgo, num, stationColor } from "../fmt";
 
 export const RANGES = [
   { k: "24h", label: "24 h", days: 1, agg: "raw" },
@@ -64,13 +64,27 @@ export function LevelChart({ stations, initial }: { stations: Station[]; initial
   const single = sel.length === 1 ? hydro.find((s) => s.key === sel[0]) : undefined;
   const option = useMemo(() => {
     const b = baseAxis();
-    const series: any[] = data.map((d) => ({
-      name: d.name, type: "line", showSymbol: d.points.length < 60, symbolSize: 6, sampling: "lttb",
+    // Corta la línea en los huecos (no inventa continuidad) y separa los puntos SOSPECHOSOS.
+    const buildLine = (d: Loaded) => {
+      const m = median(d.key);
+      const tr = (v: number) => (anom && m != null ? v - m : v);
+      const good = d.points.filter((p) => r.agg === "daily" || p[2] === "VALID");
+      const steps = good.slice(1).map((p, i) => p[0] - good[i][0]).sort((a, b) => a - b);
+      const step = steps.length ? steps[Math.floor(steps.length / 2)] : 4 * 3600e3;
+      const gap = Math.max(3 * step, 12 * 3600e3);
+      const out: any[] = [];
+      good.forEach((p, i) => {
+        if (i && p[0] - good[i - 1][0] > gap) out.push({ value: [good[i - 1][0] + 1, null] });
+        out.push({ value: [p[0], tr(p[1])], q: p[2], raw: p[1] });
+      });
+      const sus = r.agg === "daily" ? [] : d.points.filter((p) => p[2] !== "VALID").map((p) => ({ value: [p[0], tr(p[1])], q: p[2], raw: p[1] }));
+      return { out, sus };
+    };
+    const built = data.map((d) => ({ d, ...buildLine(d) }));
+    const series: any[] = built.map(({ d, out }) => ({
+      name: d.name, type: "line", showSymbol: out.length < 60, symbolSize: 6, connectNulls: false,
       lineStyle: { width: 2, color: stationColor(d.key) }, itemStyle: { color: stationColor(d.key) },
-      data: d.points.map((p) => {
-        const m = median(d.key);
-        return { value: [p[0], anom && m != null ? p[1] - m : p[1]], q: p[2], raw: p[1] };
-      }),
+      data: out,
       markLine: !anom && single && d.key === single.key && single.stats_brief ? {
         symbol: "none", silent: true, label: { color: cssVar("var(--muted)"), formatter: "{b}", position: "insideEndTop" },
         lineStyle: { type: "dashed", color: cssVar("var(--muted)"), width: 1 },
@@ -80,6 +94,8 @@ export function LevelChart({ stations, initial }: { stations: Station[]; initial
         ].filter(Boolean),
       } : undefined,
     }));
+    for (const { d, sus } of built) if (sus.length) series.push({ name: `${d.name} (sospechoso)`, type: "scatter", symbol: "triangle", symbolSize: 8,
+      itemStyle: { color: cssVar("var(--muted)") }, data: sus });
     if (hist && hist.length && !anom) {
       series.push({ name: "BDHI diaria (histórico)", type: "line", showSymbol: false, lineStyle: { width: 1.5, type: "dotted", color: cssVar("var(--muted)") },
         itemStyle: { color: cssVar("var(--muted)") }, data: hist.map((p) => ({ value: p, q: "BDHI" })) });
@@ -87,7 +103,7 @@ export function LevelChart({ stations, initial }: { stations: Station[]; initial
     return {
       animation: false,
       textStyle: b.textStyle, grid: b.grid, xAxis: b.xAxis,
-      yAxis: { ...b.yAxis, name: anom ? "Desvío vs normal (m)" : "Escala (m)", nameTextStyle: { color: cssVar("var(--muted)") } },
+      yAxis: { ...b.yAxis, name: anom ? "vs mediana del registro (m)" : "Escala (m)", nameTextStyle: { color: cssVar("var(--muted)") } },
       legend: { show: series.length > 1, top: 0, textStyle: { color: cssVar("var(--text-2)") }, icon: "roundRect" },
       tooltip: {
         trigger: "axis", ...b.tooltipBase, axisPointer: { type: "cross", label: { backgroundColor: cssVar("var(--panel-2)") } },
@@ -95,8 +111,8 @@ export function LevelChart({ stations, initial }: { stations: Station[]; initial
           if (!ps.length) return "";
           const t = ps[0].value[0];
           const head = r.agg === "daily" ? `<b>${fDate(new Date(t).toISOString())}</b> (promedio diario)` : `<b>${fDateTime(new Date(t).toISOString())}</b>`;
-          const rows = ps.map((p) => `${p.marker} ${p.seriesName}: <b>${anom && p.data.raw != null && p.value[1] !== p.data.raw ? `${dev(p.value[1])} vs normal</b> (escala ${num(p.data.raw)} m)` : `${num(p.value[1])} m</b>`}${p.data.q && p.data.q !== "VALID" && r.agg !== "daily" ? ` <span style="opacity:.7">(${p.data.q})</span>` : ""}`);
-          return `${head}<br/>${rows.join("<br/>")}<br/><span style="opacity:.7">Caudal: sin datos públicos · Fuente: INA</span>`;
+          const rows = ps.filter((p) => p.value[1] != null).map((p) => `${p.marker} ${esc(p.seriesName)}: <b>${anom && p.data.raw != null && p.value[1] !== p.data.raw ? `${dev(p.value[1])} vs mediana</b> (escala ${num(p.data.raw)} m)` : `${num(p.value[1])} m</b>`}${p.data.q && p.data.q !== "VALID" && r.agg !== "daily" ? ` <span style="opacity:.7">(${esc(p.data.q)} — no se usa en cálculos)</span>` : ""}`);
+          return `${head} ART<br/>${rows.join("<br/>")}<br/><span style="opacity:.7">Lectura de escala medida por el INA (no es profundidad)</span>`;
         },
       },
       dataZoom: [{ type: "inside" }, { type: "slider", height: 22, bottom: 12, borderColor: cssVar("var(--line)"), textStyle: { color: cssVar("var(--muted)") } }],
@@ -116,7 +132,7 @@ export function LevelChart({ stations, initial }: { stations: Station[]; initial
         {sel.length === 1 && hydro.find((s) => s.key === sel[0])?.series.some((x) => x.role === "level_hist") && (
           <label className="chip"><input type="checkbox" checked={showBdhi} onChange={(e) => setShowBdhi(e.target.checked)} /> Serie histórica BDHI</label>
         )}
-        <label className="chip" title="Resta a cada estación su mediana histórica: así las curvas quedan comparables"><input type="checkbox" checked={anom} onChange={(e) => setAnom(e.target.checked)} /> Ver como desvío de lo normal</label>
+        <label className="chip" title="Resta a cada estación la mediana de su registro: sirve para comparar la forma y el momento de las subidas (CALCULADO)"><input type="checkbox" checked={anom} onChange={(e) => setAnom(e.target.checked)} /> Centrar en la mediana de cada estación</label>
         {loading && <span className="small muted">cargando…</span>}
       </div>
       <div className="row" style={{ marginBottom: 8 }}>
@@ -133,8 +149,8 @@ export function LevelChart({ stations, initial }: { stations: Station[]; initial
       </div>
       <ReactECharts option={option} notMerge style={{ height: 380 }} />
       <div className="src">
-        {r.agg === "daily" ? "Promedios diarios (hora argentina). " : "Datos crudos del INA. "}
-        {anom ? "Cada curva muestra cuánto está esa estación por encima o por debajo de su propia mediana histórica: 0 = nivel normal." : "Lectura de escala: el cero de cada estación es arbitrario (no es profundidad) y no se compara entre estaciones."}
+        {r.agg === "daily" ? "Promedios diarios (hora argentina). " : "Datos del INA; los huecos se muestran cortando la línea y los puntos sospechosos como ▲ gris. "}
+        {anom ? "Cada curva muestra cuánto está esa estación por encima o por debajo de la mediana de su propio registro (0 = mediana; no es un “normal” oficial). Sirve para comparar forma y momento de las subidas." : "Lectura de escala: el cero de cada estación es arbitrario (no es profundidad) y no se compara entre estaciones."}
         {showBdhi && " La serie BDHI (Red Hidrológica Nacional – SSRH) puede tener otro cero que la estación telemétrica."}
       </div>
     </div>

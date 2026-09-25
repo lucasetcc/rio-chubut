@@ -1,19 +1,26 @@
-import { useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { api, Station } from "./api";
-import { AlertsPanel, ConfigPanel, ExportPanel, SystemPanel } from "./components/AlertsConfig";
-import { LevelChart } from "./components/Charts";
-import { DamPanel, DamSummary } from "./components/DamPanel";
-import { MapPanel } from "./components/MapPanel";
+import { AlertsPanel } from "./components/AlertsConfig";
+import { DamSummary } from "./components/DamPanel";
 import { ForecastMini, ForecastPanel, forecastTop } from "./components/Forecast";
 import { Headline, Kpis, RiverProfile } from "./components/Overview";
-import { FloodPanel, PropagationPanel } from "./components/Propagation";
-import { RainPanel } from "./components/RainPanel";
 import { StationCard, StationTable } from "./components/StationCards";
-import { StatsPanel } from "./components/StatsPanel";
 import { S } from "./data/engine";
 import { ago, fDateTime } from "./fmt";
 
-const TABS = [["resumen", "Resumen"], ["evolucion", "Evolución"], ["lluvia", "Lluvia"], ["crecidas", "Crecidas"], ["mapa", "Mapa"], ["dique", "Dique"]];
+// Pestañas pesadas (gráficos, mapa, admin) se cargan recién cuando se abren
+const LevelChart = lazy(() => import("./components/Charts").then((m) => ({ default: m.LevelChart })));
+const StatsPanel = lazy(() => import("./components/StatsPanel").then((m) => ({ default: m.StatsPanel })));
+const RainPanel = lazy(() => import("./components/RainPanel").then((m) => ({ default: m.RainPanel })));
+const PropagationPanel = lazy(() => import("./components/Propagation").then((m) => ({ default: m.PropagationPanel })));
+const FloodPanel = lazy(() => import("./components/Propagation").then((m) => ({ default: m.FloodPanel })));
+const MapPanel = lazy(() => import("./components/MapPanel").then((m) => ({ default: m.MapPanel })));
+const DamPanel = lazy(() => import("./components/DamPanel").then((m) => ({ default: m.DamPanel })));
+const ConfigPanel = lazy(() => import("./components/AlertsConfig").then((m) => ({ default: m.ConfigPanel })));
+const ExportPanel = lazy(() => import("./components/AlertsConfig").then((m) => ({ default: m.ExportPanel })));
+const SystemPanel = lazy(() => import("./components/AlertsConfig").then((m) => ({ default: m.SystemPanel })));
+
+const TABS = [["resumen", "Resumen"], ["evolucion", "Evolución"], ["lluvia", "Lluvia"], ["crecidas", "Indicadores"], ["mapa", "Mapa"], ["dique", "Dique"]];
 
 const Logo = () => (
   <span className="logo" aria-hidden>
@@ -78,9 +85,16 @@ export default function App() {
 
   useEffect(() => {
     load();
-    const t = setInterval(async () => { await api.collect().catch(() => {}); load(); }, 5 * 60_000);
-    const p = setInterval(() => setProgress({ ...S.progress }), 300);
-    return () => { clearInterval(t); clearInterval(p); };
+    // refresco cada 5 min, sólo si la pestaña está visible (en segundo plano no consume)
+    const t = setInterval(async () => { if (document.hidden) return; await api.collect().catch(() => {}); load(); }, 5 * 60_000);
+    const onVis = () => { if (!document.hidden && Date.now() - S.loadedAt > 5 * 60_000) api.collect().then(load).catch(() => {}); };
+    document.addEventListener("visibilitychange", onVis);
+    // barra de progreso: sólo mientras se hace la primera carga
+    const p = setInterval(() => {
+      setProgress((cur) => (cur.done !== S.progress.done || cur.total !== S.progress.total ? { ...S.progress } : cur));
+      if (S.loadedAt) clearInterval(p);
+    }, 300);
+    return () => { clearInterval(t); clearInterval(p); document.removeEventListener("visibilitychange", onVis); };
   }, [load]);
 
   // los gráficos leen colores del tema: redibujar al cambiarlo
@@ -122,12 +136,13 @@ export default function App() {
               <a key={id} href={`#${id}`} className={tab === id ? "on" : ""}>{l}{id === "crecidas" && activeAlerts.length ? <span className="count">{activeAlerts.length}</span> : null}</a>
             ))}
           </nav>
-          <span className={`live ${liveCls}`} title={status?.overall?.label}><span className="dot" /><span className="txt">Datos INA en vivo</span></span>
+          <span className={`live ${liveCls}`} title={`${status?.overall?.label || ""} · datos del INA, se consultan cada 10 min`}><span className="dot" /><span className="txt">Consultado {status?.collector?.last_cycle?.at ? fDateTime(status.collector.last_cycle.at).slice(-5) : "—"} ART</span></span>
           <button className="small ghost" onClick={toggleTheme} title="Cambiar tema" aria-label="Cambiar tema">{theme === "dark" ? "☀" : "☾"}</button>
         </div>
       </header>
 
       <main className="wrap">
+        <Suspense fallback={<div className="card muted" style={{ marginTop: 22 }}>Cargando…</div>}>
         {tab === "resumen" && <>
           <section style={{ marginTop: 22 }}>
             <div className="hero card">
@@ -135,7 +150,7 @@ export default function App() {
                 <h1>Estado del Río Chubut</h1>
                 <Headline main={main} prop={prop} fcTop={forecastTop(fc)} />
                 <div className="meta">
-                  Último dato: <b>{status?.last_data_local || "—"}</b>{status?.last_data_ts && ` (${ago(status.last_data_ts)})`}
+                  Último dato recibido: <b>{status?.last_data_local || "—"} ART</b>{status?.last_data_ts && ` (${ago(status.last_data_ts)})`} · {status?.overall?.label}
                 </div>
               </div>
               <div className="row" style={{ justifyContent: "flex-end" }}>
@@ -145,7 +160,7 @@ export default function App() {
             </div>
             {err && <div className="msg crit">{err}</div>}
             {empty && <div className="msg warn">No llegaron datos del INA. Puede estar caído o lento: la página reintenta sola cada 5 minutos.</div>}
-            {activeAlerts.slice(0, 3).map((a) => <div key={a.id} className="msg warn" style={{ cursor: "pointer" }} onClick={() => go("crecidas")}>{a.message}</div>)}
+            {activeAlerts.slice(0, 3).map((a) => <div key={a.id} className="msg warn" style={{ cursor: "pointer" }} onClick={() => go("crecidas")}><span className="tag tag-calc">INDICADOR PROPIO</span> {a.message}</div>)}
             <Kpis status={status} main={main} rain={rain} alerts={alerts} />
           </section>
           <section>
@@ -153,7 +168,7 @@ export default function App() {
             <RiverProfile main={main} prop={prop} dam={dam} />
           </section>
           <section>
-            <h2>Estaciones <span className="hint">número grande = cuánto está por encima o por debajo de lo normal</span></h2>
+            <h2>Estaciones <span className="hint">número grande = lectura de la regla de cada estación (no es profundidad ni se compara entre estaciones)</span></h2>
             <div className="chain">{main.map((s) => <StationCard key={s.key} s={s} />)}</div>
           </section>
           <section>
@@ -196,7 +211,7 @@ export default function App() {
 
         {tab === "crecidas" && <>
           <section style={{ marginTop: 22 }}>
-            <h2>Alertas</h2>
+            <h2>Indicadores automáticos <span className="hint">criterio propio, no oficial</span></h2>
             <AlertsPanel alerts={alerts} reload={load} />
           </section>
           <section>
@@ -204,7 +219,7 @@ export default function App() {
             <PropagationPanel key={theme} prop={prop} />
           </section>
           <section>
-            <h2>Detección de crecidas</h2>
+            <h2>Subidas detectadas <span className="hint">criterio propio</span></h2>
             <FloodPanel floods={floods} />
           </section>
         </>}
@@ -227,6 +242,7 @@ export default function App() {
           <h2 style={{ marginTop: 24 }}>Estado de las fuentes</h2>
           <SystemPanel status={status} />
         </section>}
+        </Suspense>
       </main>
 
       <footer className="foot">

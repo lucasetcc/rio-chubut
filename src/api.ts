@@ -34,7 +34,10 @@ export type Station = {
   status?: Status;
   stats_brief?: { avg_7d: number | null; avg_30d: number | null; avg_365d: number | null; p90_hist: number | null;
     history_days: number; comparisons: Record<string, number | null>; same_month_mean: number | null;
-    pct?: number | null; pct_class?: { label: string; code: string } | null; hist?: Describe; base_from?: string | null } | null;
+    pct?: number | null; pct_class?: { label: string; code: string } | null; hist?: Describe; base_from?: string | null;
+    clim?: { ok: boolean; month_name: string; years: string[]; median: number | null; p25: number | null; p75: number | null; reason: string | null };
+    record_median?: number | null; record_since?: string } | null;
+  source_state?: "ok" | "partial_error" | "error" | "mismatch" | "nodata"; source_error_at?: string | null; official_threshold?: null;
   flood?: Flood;
   discharge: null; discharge_note: string | null;
   rain?: RainSummary;
@@ -57,8 +60,8 @@ export type Stats = {
 // ======================================================================================
 import * as an from "./data/analytics";
 import { CFG, D, H, iso, localDate, P } from "./data/analytics";
-import { DEFAULT_RULES, lastTs, loadAll, loadHist, loadSettings, S, seriesOf, Settings, sourceUrl, usable } from "./data/engine";
-import { fDateTime } from "./fmt";
+import { DEFAULT_RULES, lastValidTs, loadAll, loadHist, loadSettings, S, seriesOf, Settings, sourceUrl, usable } from "./data/engine";
+import { fDateTime, safeUrl } from "./fmt";
 import seed from "./data/stations.json";
 import damRef from "./data/dam_reference.json";
 
@@ -81,18 +84,20 @@ function settings(): Required<Pick<Settings, "rules" | "thresholds" | "dam">> & 
   return { ...s, rules: s.rules ?? DEFAULT_RULES, thresholds: s.thresholds ?? {}, dam: s.dam ?? [] };
 }
 async function saveSettings(patch: Partial<Settings>) {
-  let key = localStorage.getItem("adminKey");
+  let key = sessionStorage.getItem("adminKey");
   if (!key) {
     key = window.prompt("Clave de administrador (ADMIN_KEY configurada en Netlify):") || "";
     if (!key) throw new Error("Se necesita la clave para guardar cambios");
   }
   await loadSettings(); // partir de lo último guardado
   const body = { ...settings(), ...patch };
-  const r = await fetch("/api/settings", { method: "PUT", headers: { "content-type": "application/json", "x-admin-key": key }, body: JSON.stringify(body) });
+  const r = await fetch("/api/settings", { method: "PUT",
+    headers: { "content-type": "application/json", "x-admin-key": key, "x-if-updated-at": S.settings.updated_at || "" }, body: JSON.stringify(body) });
   const res = await r.json().catch(() => ({}));
-  if (r.status === 401) { localStorage.removeItem("adminKey"); throw new Error("Clave incorrecta"); }
+  if (r.status === 401) { sessionStorage.removeItem("adminKey"); throw new Error("Clave incorrecta"); }
+  if (r.status === 409) throw new Error("Otra persona guardó cambios recién. Recargá la página y volvé a intentar.");
   if (!r.ok) throw new Error(res.error || `HTTP ${r.status}`);
-  localStorage.setItem("adminKey", key);
+  sessionStorage.setItem("adminKey", key);
   S.settings = res;
   invalidate();
   return res;
@@ -105,9 +110,10 @@ function seriesInfo(key: string) {
     const st = S.series.get(d.id);
     const lt = st?.obs.length ? iso(st.obs[st.obs.length - 1].t) : null;
     return { id: d.id, role: d.role, var_code: st?.meta?.var?.var ?? null, var_name: st?.meta?.var?.nombre ?? null, unit: st?.unit ?? null,
-      verify_status: st?.verify ?? (d.role === "level_hist" ? "a pedido" : "pending"), verify_detail: st?.verify_detail ?? null,
+      verify_status: st?.verify ?? (d.role === "level_hist" ? "se carga al abrir el histórico" : "pending"), verify_detail: st?.verify_detail ?? null,
       last_obs_ts: lt, last_obs_local: localStr(lt), source_url: sourceUrl(d.id),
-      last_fetch_status: st?.verify === "error" ? "error" : st ? "ok" : null, last_error: st?.error ?? null, fetched_at: st?.fetched_at ?? null };
+      last_fetch_status: st?.verify === "error" ? "error" : st ? "ok" : null, last_error: st?.error ?? null, error_at: st?.error_at ?? null,
+      fetched_at: st?.fetched_at ?? null, last_fetch_at: st?.fetched_at ?? st?.error_at ?? null };
   });
 }
 
@@ -134,11 +140,18 @@ function stationSummary(key: string): Station {
     const stats = stationStats(key);
     out.level = recent.length ? { value: recent[recent.length - 1][1], unit: "m", ts: iso(recent[recent.length - 1][0]),
       ts_local: localStr(recent[recent.length - 1][0]), changes: an.changes(recent), measured: true } : null;
-    out.status = an.stationStatus(recent, stats, settings().thresholds[key]?.crecida_m);
+    out.status = an.stationStatus(recent, settings().thresholds[key]);
+    const clim = stats.available ? stats.same_month_climatology : null;
     out.stats_brief = stats.available ? { avg_7d: stats.windows["7d"].mean, avg_30d: stats.windows["30d"].mean, avg_365d: stats.windows["365d"].mean,
-      p90_hist: stats.windows.historico.p90, history_days: stats.history_days, comparisons: stats.comparisons, same_month_mean: stats.same_month_climatology.mean,
+      p90_hist: stats.windows.historico.p90, history_days: stats.history_days, comparisons: stats.comparisons, same_month_mean: clim.median,
       pct: stats.percentile_rank_hist, pct_class: an.pctClass(stats.percentile_rank_hist), hist: stats.windows.historico,
+      clim: { ok: clim.ok, month_name: clim.month_name, years: clim.years, median: clim.median, p25: clim.p25, p75: clim.p75, reason: clim.reason },
+      record_median: stats.windows.historico.median, record_since: stats.record_since,
       base_from: seriesOf(key, "level")?.baseFrom ? iso(seriesOf(key, "level")!.baseFrom!) : null } : null;
+    const ls = seriesOf(key, "level");
+    out.source_state = !ls ? "nodata" : ls.verify === "mismatch" ? "mismatch" : ls.verify === "error" && !ls.obs.length ? "error" : recent.length ? (ls.error ? "partial_error" : "ok") : "nodata";
+    out.source_error_at = ls?.error_at ?? null;
+    out.official_threshold = null; // no hay umbrales oficiales públicos para estas estaciones
     out.flood = an.floodDetection(sd.name, recent);
     const wk = recent.filter(([t]) => t >= Date.now() - 7 * D);
     const step = Math.max(1, Math.ceil(wk.length / 120));
@@ -150,7 +163,7 @@ function stationSummary(key: string): Station {
 
 function rainSummaryOf(key: string) {
   const pts = usable(key, "rain", Date.now() - 62 * D);
-  const r = an.rainSummary(pts, lastTs(key, "rain"));
+  const r = an.rainSummary(pts, lastValidTs(key, "rain"));
   r.last_local = localStr(r.last_ts);
   return r;
 }
@@ -186,18 +199,22 @@ function evalAlerts() {
           if (!pts.length) continue;
           const [tl, vl] = pts[pts.length - 1];
           const name = names[k] || k;
+          const isStale = (Date.now() - tl) / H > CFG.staleHours;
+          if (isStale && rule.type !== "stale") continue; // con dato viejo no se evalúan subidas ni tendencias
           if (rule.type === "rise") {
             const h = Number(p.hours ?? 6);
             const ref = an.valueAt(pts, tl - h * H, Math.max(1, h * 0.35));
-            if (ref && (vl - ref[1]) * 100 > Number(p.cm ?? 10)) push(k, `${name} subió ${Math.round((vl - ref[1]) * 100)} cm en ${h} h.`, (vl - ref[1]) * 100, iso(tl));
+            if (ref && (vl - ref[1]) * 100 > Number(p.cm ?? 10)) push(k, `${name} subió ${Math.round((vl - ref[1]) * 100)} cm en ${h} h (hasta el dato de ${localStr(tl)}).`, (vl - ref[1]) * 100, iso(tl));
           } else if (rule.type === "above_avg") {
+            // "supera el promedio" sin margen dispararía la mitad del tiempo: se exige media + 2 desvíos
             const days = Number(p.days ?? 30);
             const dm = an.dailyMeans(pts.filter(([t]) => t >= tl - (days + 1) * D));
             const today = localDate(Date.now());
             const means = [...dm.entries()].filter(([d]) => d < today).map(([, x]) => x.mean).slice(-days);
-            if (means.length >= Math.max(3, Math.floor(days / 2))) {
+            if (means.length >= Math.ceil(CFG.minCoverage * days)) {
               const avg = means.reduce((a, b) => a + b, 0) / means.length;
-              if (vl > avg) push(k, `${name} supera el promedio de ${days} días (${vl.toFixed(2)} m vs ${avg.toFixed(2)} m).`, (vl - avg) * 100, iso(tl));
+              const sd = Math.sqrt(means.reduce((a, b) => a + (b - avg) ** 2, 0) / means.length);
+              if (vl > avg + 2 * sd && vl - avg >= 0.03) push(k, `${name} está claramente por encima del promedio de ${days} días (${vl.toFixed(2)} m vs ${avg.toFixed(2)} m).`, (vl - avg) * 100, iso(tl));
             }
           } else if (rule.type === "trend") {
             const tr = an.trend(pts);
@@ -219,10 +236,8 @@ function evalAlerts() {
         const h = Number(p.hours ?? 24);
         const keys = rule.station_key ? [rule.station_key] : S.stations.filter((s) => s.series.some((x) => x.role === "rain")).map((s) => s.key);
         for (const k of keys) {
-          const pts = usable(k, "rain", Date.now() - h * H);
-          if (!pts.length) continue;
-          const mm = pts.reduce((a, [, v]) => a + v, 0);
-          if (mm > Number(p.mm ?? 20)) push(k, `Lluvia acumulada en ${names[k] || k}: ${mm.toFixed(1)} mm en ${h} h.`, mm, iso(pts[pts.length - 1][0]));
+          const r = an.rainSum(usable(k, "rain", Date.now() - h * H - H), Date.now() - h * H, Date.now());
+          if (r.mm != null && r.mm > Number(p.mm ?? 20)) push(k, `Lluvia acumulada en ${names[k] || k}: ${r.mm.toFixed(1)} mm en ${h} h.`, r.mm, iso(Date.now()));
         }
       }
     }
@@ -232,7 +247,7 @@ function evalAlerts() {
 
 export const RULE_TYPES = {
   rise: { params: { cm: "float", hours: "float" }, help: "Subió más de <cm> en <hours> horas" },
-  above_avg: { params: { days: "int" }, help: "Nivel actual por encima del promedio de <days> días" },
+  above_avg: { params: { days: "int" }, help: "Nivel claramente por encima del promedio de <days> días (media + 2 desvíos)" },
   trend: { params: { direction: "SUBIENDO|BAJANDO" }, help: "La tendencia es <direction>" },
   propagation: { params: {}, help: "Hay una señal de subida aguas arriba que podría llegar a esta estación" },
   rain: { params: { mm: "float", hours: "float" }, help: "Lluvia acumulada > <mm> en <hours> horas (vacío = cualquier estación)" },
@@ -268,7 +283,7 @@ export const api = {
       : fresh < lvl.length ? { code: "partial", emoji: "🟠", label: `${fresh}/${lvl.length} estaciones actualizadas` }
       : { code: "ok", emoji: "🟢", label: "Todas las estaciones actualizadas" };
     const at = S.loadedAt ? iso(S.loadedAt) : null;
-    return { mode: "REAL DATA", overall, now: iso(Date.now()), last_data_ts: lastData, last_data_local: localStr(lastData),
+    return { overall, now: iso(Date.now()), last_data_ts: lastData, last_data_local: localStr(lastData),
       collector: { enabled: true, poll_minutes: 10, running: S.loading, last_cycle: at ? { at } : null, next_cycle: S.loadedAt ? iso(S.loadedAt + 600e3) : null,
         last_cycle_error: S.lastError }, series };
   },
@@ -277,7 +292,7 @@ export const api = {
     await loadAll();
     const since = Date.parse(from);
     if (variable === "rain") {
-      if (agg === "daily") return { unit: "mm", data: an.rainDaily(usable(k, "rain"), since) };
+      if (agg === "daily") return { unit: "mm", data: an.rainDaily(usable(k, "rain", since), since) };
       const st = seriesOf(k, "rain");
       return { unit: "mm", data: (st?.obs || []).filter((o) => o.t >= since).map((o) => ({ ts: iso(o.t), value: o.v, quality: o.q, source: "INA" })) };
     }
@@ -348,8 +363,8 @@ export const api = {
       references: refs,
       cota_max_normal: cfg.dam_limits?.cota_max_normal ?? refVal("cota_vertedero"), cota_min_operativa: cfg.dam_limits?.cota_min_operativa ?? refVal("cota_min_operativa"),
       variables: {} };
-    const pub = (damRef as any).readings.map((r: any, i: number) => ({ ...r, id: `pub${i}`, ts: new Date(`${r.ts}T12:00:00-03:00`).toISOString(), source_url: r.url, quality: r.approx ? "PUBLICADO (aprox.)" : "PUBLICADO" }));
-    const allRows = [...pub, ...cfg.dam.map((r: any) => ({ ...r, quality: "MANUAL" }))];
+    const pub = (damRef as any).readings.map((r: any, i: number) => ({ ...r, id: `pub${i}`, ts: new Date(`${r.ts}T12:00:00-03:00`).toISOString(), source_url: safeUrl(r.url), quality: r.approx ? "PUBLICADO (aprox.)" : "PUBLICADO" }));
+    const allRows = [...pub, ...cfg.dam.map((r: any) => ({ ...r, source_url: safeUrl(r.source_url), quality: "MANUAL" }))];
     out.chronology = [...allRows].sort((a: any, b: any) => b.ts.localeCompare(a.ts)).map((r: any) => ({ ...r, ts_local: localStr(r.ts)?.slice(0, 10) }));
     for (const [v, unit] of Object.entries(UNITS)) {
       const rows = allRows.filter((r: any) => r.variable === v).sort((a: any, b: any) => a.ts.localeCompare(b.ts));
@@ -362,7 +377,10 @@ export const api = {
         const ref = an.valueAt(pts, tl - h * H, tol);
         ch[k] = ref ? Math.round((last.value - ref[1]) * 1000) / 1000 : null;
       }
-      out.variables[v] = { available: true, unit, last: { ...last, ts_local: localStr(last.ts)?.slice(0, 10) }, age_days: Math.round(((Date.now() - tl) / D) * 10) / 10, changes: ch };
+      const age = Math.round(((Date.now() - tl) / D) * 10) / 10;
+      // caudales y generación con más de 30 días no se muestran como valor vigente
+      const expired = v !== "cota" && age > 30;
+      out.variables[v] = { available: true, expired, unit, last: { ...last, ts_local: localStr(last.ts)?.slice(0, 10) }, age_days: age, changes: ch };
     }
     const cota = out.variables.cota;
     if (cota.available) {
@@ -376,16 +394,18 @@ export const api = {
       };
     }
     const vin = out.variables.caudal_entrante, vout = out.variables.caudal_saliente;
-    out.balance = vin.available && vout.available
-      ? { available: true, estimated: true, q_in: vin.last.value, q_out: vout.last.value, delta_storage_hm3_day: Math.round(((vin.last.value - vout.last.value) * 86400) / 1e3) / 1e3,
-          note: "ESTIMADO: ΔS = (Qentrada − Qsalida) × 86400 s. No incluye evaporación ni infiltración." }
+    const bal = vin.available && vout.available && !vin.expired && !vout.expired ? an.damBalance(vin.last, vout.last) : null;
+    out.balance = bal != null
+      ? { available: true, estimated: true, q_in: vin.last.value, q_out: vout.last.value, delta_storage_hm3_day: bal,
+          note: "ESTIMADO: ΔS = (Qentrada − Qsalida) × 86400 s, con caudales del mismo día. No incluye evaporación ni infiltración." }
       : { available: false, note: "No se puede calcular el balance: no hay caudales públicos de entrada ni de salida. El nivel de Las Plumas indica cualitativamente el aporte del río, pero sin curva de gasto no se convierte a m³/s." };
     return out;
   },
   async addDam(b: any) {
     const UNITS: Record<string, string> = { cota: "m", volumen: "hm³", almacenamiento_pct: "%", caudal_entrante: "m³/s", caudal_saliente: "m³/s", generacion: "MW" };
     const value = Number(String(b.value).replace(",", "."));
-    if (!b.source || !b.ts || Number.isNaN(value)) throw new Error("Se requieren fecha, valor numérico y fuente.");
+    if (!b.source || !b.ts || !Number.isFinite(value)) throw new Error("Se requieren fecha, valor numérico y fuente.");
+    if (b.source_url && !safeUrl(b.source_url)) throw new Error("La URL de la fuente debe empezar con http:// o https://");
     const ts = b.ts.length === 10 ? `${b.ts}T12:00:00-03:00` : b.ts;
     const row = { id: Date.now(), ts: new Date(ts).toISOString(), variable: b.variable, value, unit: UNITS[b.variable], source: b.source,
       source_url: b.source_url || null, note: b.note || null, quality: "MANUAL", entered_at: new Date().toISOString() };
@@ -409,10 +429,16 @@ export const api = {
   },
   async delRule(id: number) { return saveSettings({ rules: settings().rules.filter((x: any) => x.id !== id) }); },
   async thresholds() { return settings().thresholds; },
-  async setThreshold(k: string, v: string) {
+  async setThreshold(k: string, v: string, source?: string, url?: string) {
     const th = { ...settings().thresholds };
     if (v === "" || v == null) delete th[k];
-    else { const n = Number(String(v).replace(",", ".")); if (Number.isNaN(n)) throw new Error("valor inválido"); th[k] = { crecida_m: n }; }
+    else {
+      const n = Number(String(v).replace(",", "."));
+      if (!Number.isFinite(n)) throw new Error("valor inválido");
+      if (!source || !source.trim()) throw new Error("El umbral necesita una fuente (organismo que lo publicó).");
+      if (!url || !safeUrl(url)) throw new Error("El umbral necesita la URL de la fuente (http/https).");
+      th[k] = { crecida_m: n, source: source.trim(), url: safeUrl(url)! };
+    }
     await saveSettings({ thresholds: th });
     return th;
   },
@@ -478,13 +504,8 @@ export const api = {
     const rows = (st?.obs || []).filter((o) => o.t >= t0 && o.t <= t1).map((o) => ({ station_key: k, series_id: st!.def.id, ts_utc: iso(o.t), ts_local: localStr(o.t),
       variable: role, value: o.v, unit: st!.unit, quality: o.q, quality_note: o.note || "", source: "INA – alerta.ina.gob.ar" }));
     const name = `${k}_${role}_${from.replace(/-/g, "")}_${to.replace(/-/g, "")}`;
-    if (fmt === "json") download(`${name}.json`, new Blob([JSON.stringify({ station: k, source: "INA – https://alerta.ina.gob.ar/a5", from, to, rows }, null, 1)], { type: "application/json" }));
-    else if (fmt === "xlsx") {
-      const XLSX = await import("xlsx");
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), "datos");
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Estación", k], ["Serie INA", st?.def.id ?? ""], ["Fuente", "INA – https://alerta.ina.gob.ar/a5"], ["Desde", from], ["Hasta", to], ["Exportado", new Date().toISOString()]]), "fuente");
-      download(`${name}.xlsx`, new Blob([XLSX.write(wb, { type: "array", bookType: "xlsx" })], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+    if (fmt === "json") {
+      download(`${name}.json`, new Blob([JSON.stringify({ station: k, source: "INA – https://alerta.ina.gob.ar/a5", from, to, rows }, null, 1)], { type: "application/json" }));
     } else {
       const cols = ["station_key", "series_id", "ts_utc", "ts_local", "variable", "value", "unit", "quality", "quality_note", "source"];
       const csv = [cols.join(","), ...rows.map((r: any) => cols.map((c) => { const v = r[c] ?? ""; return /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : v; }).join(","))].join("\n");

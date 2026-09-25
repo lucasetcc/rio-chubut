@@ -1,12 +1,12 @@
 import { Station } from "../api";
-import { ago, cm, dev, fDateTime, num, signed, STATION_COLOR, stationColor } from "../fmt";
+import { ago, cm, dev, fDateTime, fDateTimeArt, num, signed, STATION_COLOR, stationColor } from "../fmt";
 
 export function StatusBadge({ s }: { s?: Station["status"] }) {
   if (!s) return <span className="badge b-nodata">SIN DATOS</span>;
   return <span className={`badge b-${s.code}`} title={s.why || ""}>{s.label}</span>;
 }
 
-export const STATUS_VAR: Record<string, string> = { stable: "var(--ok)", rising: "var(--rise)", falling: "var(--fall)", flood: "var(--flood)" };
+export const STATUS_VAR: Record<string, string> = { stable: "var(--ok)", rising: "var(--rise)", falling: "var(--neutral)", over: "var(--flood)" };
 
 const Delta = ({ m }: { m: number | null | undefined }) =>
   m === null || m === undefined ? <b className="muted">—</b> : <b className={m > 0 ? "up" : m < 0 ? "down" : ""}>{cm(m)}</b>;
@@ -16,7 +16,8 @@ export function Sparkline({ pts, color }: { pts?: [number, number][]; color: str
   if (!pts || pts.length < 2) return <div className="spark nodata small" style={{ display: "grid", placeItems: "center" }}>sin datos 7 d</div>;
   const W = 200, Hh = 44, pad = 3;
   const t0 = pts[0][0], t1 = pts[pts.length - 1][0];
-  let lo = Math.min(...pts.map((p) => p[1])), hi = Math.max(...pts.map((p) => p[1]));
+  let lo = Infinity, hi = -Infinity;
+  for (const p of pts) { if (p[1] < lo) lo = p[1]; if (p[1] > hi) hi = p[1]; }
   if (hi - lo < 0.05) { const m = (hi + lo) / 2; lo = m - 0.025; hi = m + 0.025; }
   const x = (t: number) => ((t - t0) / Math.max(1, t1 - t0)) * W;
   const y = (v: number) => pad + (1 - (v - lo) / (hi - lo)) * (Hh - 2 * pad);
@@ -33,69 +34,79 @@ export function Sparkline({ pts, color }: { pts?: [number, number][]; color: str
 
 export const PCT_VAR: Record<string, string> = { vlow: "var(--fall)", low: "#d9a441", normal: "var(--ok)", high: "var(--rise)", vhigh: "var(--flood)" };
 
-/** Dónde está hoy respecto de su propia historia: barra 0–100 con banda normal (P25–P75). */
+export const Tag = ({ k }: { k: "med" | "calc" | "est" | "pub" }) => {
+  const L = { med: "MEDIDO · INA", calc: "CALCULADO", est: "ESTIMADO", pub: "PUBLICADO EN PRENSA" };
+  return <span className={`tag tag-${k}`}>{L[k]}</span>;
+};
+
+/** Comparación con lo normal. Sólo hay percentil/clase si existe climatología del mismo mes (≥3 años). */
 export function PctBar({ s }: { s: Station }) {
   const b = s.stats_brief;
-  if (!b || b.pct == null || !b.pct_class) return <div className="pct nodata small">Historia insuficiente para comparar</div>;
+  const lv = s.level;
+  if (!b || !lv) return null;
+  const clim = b.clim;
+  if (!clim?.ok || b.pct == null || !b.pct_class) {
+    const d = b.record_median != null ? lv.value - b.record_median : null;
+    return (
+      <div className="pct small">
+        <div className="pct-top"><span>vs mediana del registro <span className="muted">(desde {fDateTime(b.record_since).slice(3, 10)})</span></span><b>{dev(d)}</b></div>
+        <div className="pct-sub">Sin clase: {clim?.reason || "registro corto"}. <Tag k="calc" /></div>
+      </div>
+    );
+  }
   const c = PCT_VAR[b.pct_class.code];
+  const d = clim.median != null ? lv.value - clim.median : null;
   return (
-    <div className="pct" title={`Mediana histórica ${num(b.hist?.median)} m · normal (P25–P75): ${num(b.hist?.p25)}–${num(b.hist?.p75)} m · ${b.history_days} días de historia${b.base_from ? " (desde un probable cambio de escala)" : ""}`}>
-      <div className="pct-top"><span>Percentil <b>{Math.round(b.pct)}</b></span><b style={{ color: c }}>{b.pct_class.label.toUpperCase()}</b></div>
+    <div className="pct" title={`Mediana de ${clim.month_name} (${clim.years.join(", ")}): ${num(clim.median)} m · rango normal (P25–P75): ${num(clim.p25)}–${num(clim.p75)} m`}>
+      <div className="pct-top"><span>vs {clim.month_name} de años anteriores: <b>{dev(d)}</b></span><b style={{ color: c }}>{b.pct_class.label.toUpperCase()}</b></div>
       <div className="pct-track">
         <i className="band" style={{ left: "25%", width: "50%" }} />
         <i className="mark" style={{ left: `${Math.min(100, Math.max(0, b.pct))}%`, background: c }} />
       </div>
-      <div className="pct-sub">rango normal de escala: {num(b.hist?.p25)}–{num(b.hist?.p75)} m · {Math.round(b.history_days / 365 * 10) / 10 >= 1 ? `${(Math.round(b.history_days / 36.5) / 10).toLocaleString("es-AR")} años` : `${b.history_days} días`} de historia</div>
+      <div className="pct-sub">Percentil {Math.round(b.pct)} · {clim.years[0]}–{clim.years[clim.years.length - 1]} ({clim.years.length} años) <Tag k="calc" /></div>
     </div>
   );
+}
+
+function SourceState({ s }: { s: Station }) {
+  if (s.source_state === "mismatch") return <div className="state err">Serie inconsistente en la fuente (el INA cambió la estación o variable). No se muestran datos.</div>;
+  if (s.source_state === "error") return <div className="state err">Error al consultar el INA{s.source_error_at ? ` (${fDateTime(s.source_error_at).slice(-5)} ART)` : ""}. Se reintenta solo.</div>;
+  return <div className="state nodata">Sin datos de nivel en los últimos 45 días.</div>;
 }
 
 export function StationCard({ s }: { s: Station }) {
   const lv = s.level;
   const ch = lv?.changes || {};
   const tr = s.status?.trend;
+  const stale = s.status?.code === "stale";
   const color = stationColor(s.key);
   return (
-    <div className="st-card" style={{ ["--status" as any]: STATUS_VAR[s.status?.code || ""] || "var(--stale)" }}>
+    <div className={`st-card ${stale ? "is-stale" : ""}`} style={{ ["--status" as any]: STATUS_VAR[s.status?.code || ""] || "var(--stale)" }}>
       <div className="head">
         <h3><span className="swatch" style={{ background: color }} />{s.name}</h3>
         <StatusBadge s={s.status} />
       </div>
-      {lv ? (
+      {lv && s.source_state !== "mismatch" ? (
         <>
-          {(() => {
-            const med = s.stats_brief?.hist?.median;
-            const d = med == null ? null : lv.value - med;
-            const cls = s.stats_brief?.pct_class;
-            return <>
-              <div className="big" style={{ color: cls ? PCT_VAR[cls.code] : undefined }}>
-                {d == null ? <>{num(lv.value)}<small>m</small></> : dev(d)}
-                {tr?.cm_per_day != null && <span className={`rate ${tr.cm_per_day > 0 ? "up" : tr.cm_per_day < 0 ? "down" : "muted"}`}>{signed(tr.cm_per_day, " cm/d")}</span>}
-              </div>
-              <div className="caption">
-                {d == null ? "Lectura de escala (sin historia para comparar)" : <>respecto de lo normal <span title="Mediana de todos los días registrados en esta estación">(mediana {num(med)} m)</span></>}
-              </div>
-              <div className="scale" title="Es la lectura de la regla/sensor de esta estación. Su cero es arbitrario: NO es la profundidad del río y no se compara entre estaciones.">
-                Lectura de escala: <b>{num(lv.value)} m</b> <span className="muted">· no es profundidad ⓘ</span>
-              </div>
-            </>;
-          })()}
+          <div className="big">{num(lv.value)}<small>m</small>
+            {!stale && tr?.cm_per_day != null && <span className={`rate ${tr.label === "SUBIENDO" ? "up" : "muted"}`} title="Pendiente de las últimas 24 h (CALCULADO)">{signed(tr.cm_per_day, " cm/d")}</span>}
+          </div>
+          <div className="caption">Lectura de escala · no es profundidad <Tag k="med" /></div>
+          <div className="when">{stale ? "Último dato" : "Dato"}: <b>{fDateTimeArt(lv.ts)}</b> · {ago(lv.ts)}</div>
+          {s.source_state === "partial_error" && <div className="state err small">La última consulta al INA falló; se muestra el último dato obtenido.</div>}
           <PctBar s={s} />
-          <Sparkline pts={s.spark} color={color} />
-          <div className="deltas">
+          {!stale && <Sparkline pts={s.spark} color={color} />}
+          <div className="deltas" title="Cambios respecto del último dato">
             <div><span>6 h</span><Delta m={ch["6h"]?.delta_m} /></div>
             <div><span>24 h</span><Delta m={ch["24h"]?.delta_m} /></div>
             <div><span>7 días</span><Delta m={ch["7d"]?.delta_m} /></div>
           </div>
           <div className="foot">
-            <span title={fDateTime(lv.ts)}>{fDateTime(lv.ts).slice(0, 5)} {fDateTime(lv.ts).slice(-5)} · {ago(lv.ts)}</span>
+            <span>Umbral oficial: {s.status?.manual_threshold_m != null ? `${num(s.status.manual_threshold_m)} m (cargado)` : "no disponible"}</span>
             <a href={s.source.url} target="_blank" rel="noreferrer">INA ↗</a>
           </div>
-          {s.status?.stale && <div className="stale-note">Sin datos nuevos hace más de 24 h</div>}
         </>
-      ) : (
-        <div className="nodata" style={{ marginTop: 12 }}>Sin datos de nivel.</div>
-      )}
+      ) : <SourceState s={s} />}
     </div>
   );
 }
@@ -106,7 +117,7 @@ export function StationTable({ stations }: { stations: Station[] }) {
       <table>
         <thead>
           <tr>
-            <th>Estación</th><th>Tipo</th><th className="n">vs normal</th><th className="n">Percentil</th><th className="n">Escala (m)</th><th className="n">Caudal</th><th className="n">1 h</th><th className="n">6 h</th>
+            <th>Estación</th><th>Tipo</th><th className="n">Escala (m)</th><th className="n">vs mismo mes</th><th className="n">Clase</th><th className="n">Caudal</th><th className="n">1 h</th><th className="n">6 h</th>
             <th className="n">24 h</th><th>Tendencia</th><th className="n">Lluvia 24 h</th><th>Último dato</th><th>Fuente</th>
           </tr>
         </thead>
@@ -119,9 +130,9 @@ export function StationTable({ stations }: { stations: Station[] }) {
                 <div className="small muted">{s.river}{s.notes ? ` · ${s.notes}` : ""}</div>
               </td>
               <td className="small">{s.kind === "rain" ? "Meteorológica" : s.kind === "dam_outflow" ? "Río bajo el dique" : s.chain_order ? "Río Chubut" : "Afluente"}</td>
-              <td className="n"><b>{s.level && s.stats_brief?.hist?.median != null ? dev(s.level.value - s.stats_brief.hist.median) : "—"}</b></td>
-              <td className="n">{s.stats_brief?.pct != null ? `P${Math.round(s.stats_brief.pct)} · ${s.stats_brief.pct_class?.label}` : "—"}</td>
-              <td className="n muted">{s.level ? num(s.level.value) : "—"}</td>
+              <td className="n"><b>{s.level ? num(s.level.value) : "—"}</b></td>
+              <td className="n">{s.level && s.stats_brief?.clim?.ok && s.stats_brief.clim.median != null ? dev(s.level.value - s.stats_brief.clim.median) : "—"}</td>
+              <td className="n">{s.stats_brief?.pct != null ? `P${Math.round(s.stats_brief.pct)} · ${s.stats_brief.pct_class?.label}` : <span className="muted">sin clase</span>}</td>
               <td className="n nodata">{s.has_level ? "s/d" : "—"}</td>
               <td className="n">{s.level ? (s.level.changes["1h"]?.delta_m == null ? "n/d" : cm(s.level.changes["1h"].delta_m)) : "—"}</td>
               <td className="n">{s.level ? cm(s.level.changes["6h"]?.delta_m) : "—"}</td>

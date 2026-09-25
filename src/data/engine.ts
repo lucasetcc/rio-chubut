@@ -14,14 +14,13 @@ export const sourceUrl = (id: number) => `https://alerta.ina.gob.ar/a5/secciones
 
 // ------------------------------------------------------------------ settings compartidos
 export type Settings = {
-  rules?: any[]; thresholds?: Record<string, { crecida_m: number }>; dam?: any[];
+  rules?: any[]; thresholds?: Record<string, { crecida_m: number; source?: string; url?: string }>; dam?: any[];
   dam_limits?: { cota_max_normal?: number | null; cota_min_operativa?: number | null };
   extra_series?: any[]; ignored_series?: number[]; discovery?: { last_run: string; candidates: any[] }; updated_at?: string;
 };
 
 export const DEFAULT_RULES = [
   { id: 1, type: "rise", station_key: "cerro_condor", params: { cm: 10, hours: 6 }, enabled: 1, description: "Cerro Cóndor subió más de 10 cm en 6 h" },
-  { id: 2, type: "above_avg", station_key: "gualjaina", params: { days: 30 }, enabled: 1, description: "Gualjaina supera el promedio de 30 días" },
   { id: 3, type: "trend", station_key: "los_altares", params: { direction: "SUBIENDO" }, enabled: 1, description: "Los Altares está creciendo" },
   { id: 4, type: "propagation", station_key: "las_plumas", params: {}, enabled: 1, description: "Las Plumas recibe una señal de subida aguas arriba" },
   { id: 5, type: "rain", station_key: null, params: { mm: 20, hours: 24 }, enabled: 1, description: "Lluvia acumulada > 20 mm en 24 h (valor editable)" },
@@ -52,7 +51,8 @@ const bucketH = () => Math.floor(Date.now() / 3600e3);
 // ------------------------------------------------------------------ estado global
 type SeriesState = {
   def: SeriesDef; station: string; obs: Obs[]; meta?: any; verify: "pending" | "ok" | "mismatch" | "error";
-  verify_detail?: string; unit?: string; error?: string; fetched_at?: string; baseFrom?: number; issues: { ts: string; issue: string; detail: string }[];
+  verify_detail?: string; unit?: string; error?: string; error_at?: string; fetched_at?: string; baseFrom?: number; issues: { ts: string; issue: string; detail: string }[];
+  closedRows?: [string, any][]; closedKey?: string; closedBad?: number;
 };
 
 export const S = {
@@ -71,7 +71,7 @@ function buildCatalog() {
   for (const x of S.settings.extra_series || []) {
     let st = base.find((s) => s.key === x.station_key) || base.find((s) => s.ina_station_id === x.ina_station_id);
     if (!st) {
-      st = { key: x.station_key, name: x.name, river: x.river || "", kind: x.role === "rain" ? "rain" : "hydro", main: false, chain_order: x.chain_order ?? null,
+      st = { key: x.station_key, name: String(x.name || x.station_key).replace(/[<>&"'`]/g, ""), river: x.river || "", kind: x.role === "rain" ? "rain" : "hydro", main: false, chain_order: x.chain_order ?? null,
         ina_station_id: x.ina_station_id, lat: x.lat, lon: x.lon, notes: "Agregada desde descubrimiento", series: [] };
       base.push(st);
     }
@@ -110,7 +110,7 @@ async function loadSeries(st: SeriesState) {
     const sd = S.stations.find((s) => s.key === st.station);
     if (c && sd && def.role !== "level_hist") { sd.lat = c[1]; sd.lon = c[0]; }
   } catch (e) {
-    st.verify = "error"; st.error = String(e); return;
+    st.verify = st.obs.length ? st.verify : "error"; st.error = String(e); st.error_at = iso(Date.now()); return;
   }
   // 2) observaciones por año (años cerrados: cache largo; año actual: cache 10 min)
   const tsStart = st.meta?.date_range?.timestart ? Date.parse(st.meta.date_range.timestart) : Date.now() - 400 * D;
@@ -121,14 +121,24 @@ async function loadSeries(st: SeriesState) {
   let firstQ = qIdx(tsStart);
   if (def.role === "rain") firstQ = Math.max(firstQ, nowQ - 5); // lluvia: ~último año y medio alcanza
   const lastQ = Math.min(qIdx(tsEnd), nowQ);
-  const urls: string[] = [];
-  for (let q = firstQ; q <= lastQ; q++) urls.push(q < nowQ ? `/api/ina/obs/${def.id}/${Math.floor(q / 4)}-Q${(q % 4) + 1}` : `/api/ina/obs/${def.id}/recent/${bucket10()}`);
-  if (lastQ < nowQ && Date.now() - tsEnd < 120 * D) urls.push(`/api/ina/obs/${def.id}/recent/${bucket10()}`);
+  // Los trimestres cerrados no cambian: se descargan una vez y en las recargas sólo se pide el trimestre actual.
+  const closed: string[] = [];
+  for (let q = firstQ; q <= Math.min(lastQ, nowQ - 1); q++) closed.push(`/api/ina/obs/${def.id}/${Math.floor(q / 4)}-Q${(q % 4) + 1}`);
+  const needRecent = lastQ >= nowQ || Date.now() - tsEnd < 120 * D;
+  const closedKey = closed.join("|");
   const rows: [string, any][] = [];
   let bad = 0;
   try {
-    for (const u of urls) {
-      const r = await getJSON(u);
+    if (st.closedKey !== closedKey || !st.closedRows) {
+      const cr: [string, any][] = [];
+      let cb = 0;
+      for (const u of closed) { const r = await getJSON(u); cr.push(...r.data); cb += r.bad_format || 0; }
+      st.closedRows = cr; st.closedKey = closedKey; st.closedBad = cb;
+    }
+    rows.push(...st.closedRows);
+    bad += st.closedBad || 0;
+    if (needRecent) {
+      const r = await getJSON(`/api/ina/obs/${def.id}/recent/${bucket10()}`);
       rows.push(...r.data);
       bad += r.bad_format || 0;
       st.fetched_at = r.fetched_at;
@@ -136,6 +146,7 @@ async function loadSeries(st: SeriesState) {
   } catch (e) {
     // falla parcial: se conservan los datos ya cargados y se informa el error
     st.error = `No se pudieron descargar los datos: ${String(e)}`;
+    st.error_at = iso(Date.now());
     if (st.verify === "ok" && !st.obs.length) st.verify = "error";
     return;
   }
@@ -191,7 +202,8 @@ async function loadSeries(st: SeriesState) {
         const post = ok.filter((o) => o.t >= b.t).map((o) => o.v as number);
         if (pre.length >= 10 && post.length >= 10) {
           const p5 = pre[Math.floor(pre.length * 0.05)], p95 = pre[Math.floor(pre.length * 0.95)];
-          if ((d1 > 0 && Math.min(...post) > p95 + 0.3) || (d1 < 0 && Math.max(...post) < p5 - 0.3)) st.baseFrom = b.t;
+          const [postMin, postMax] = an.minMax(post);
+          if ((d1 > 0 && postMin > p95 + 0.3) || (d1 < 0 && postMax < p5 - 0.3)) st.baseFrom = b.t;
         }
       }
       st.issues.push({ ts: iso(b.t), issue: "level_shift", detail: `escalón de ${d1 > 0 ? "+" : ""}${d1.toFixed(2)} m ${near ? "" : `tras ${Math.round((b.t - a.t) / D)} días sin datos `}(crecida real o posible cambio de cero de escala)` });
@@ -199,6 +211,7 @@ async function loadSeries(st: SeriesState) {
   }
   st.obs = obs;
   st.error = undefined;
+  st.error_at = undefined;
 }
 
 export async function loadSettings() {
@@ -262,4 +275,11 @@ export function usable(key: string, role = "level", since = 0): P[] {
 export function lastTs(key: string, role: string): number | null {
   const st = seriesOf(key, role);
   return st?.obs.length ? st.obs[st.obs.length - 1].t : null;
+}
+/** Timestamp del último registro VALID (no cuenta nulos ni sospechosos). */
+export function lastValidTs(key: string, role: string): number | null {
+  const st = seriesOf(key, role);
+  if (!st || st.verify === "mismatch") return null;
+  for (let i = st.obs.length - 1; i >= 0; i--) if (st.obs[i].q === "VALID" && st.obs[i].v !== null) return st.obs[i].t;
+  return null;
 }

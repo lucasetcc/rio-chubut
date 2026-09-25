@@ -1,4 +1,4 @@
-import ReactECharts from "echarts-for-react";
+import ReactECharts from "./EChart";
 import { useEffect, useMemo, useState } from "react";
 import { api, Station } from "../api";
 import { ago, cssVar, fDate, fDateTime, isoDaysAgo, num, stationColor } from "../fmt";
@@ -43,11 +43,14 @@ export function RainPanel({ rain, stations }: { rain: any; stations: Station[] }
       tooltip: { trigger: "axis", backgroundColor: cssVar("var(--panel)"), borderColor: line, textStyle: { color: cssVar("var(--text)") },
         formatter: (ps: any[]) => ps.map((p) => p.seriesIndex === 0
           ? `<b>${fDate(new Date(p.value[0]).toISOString())}</b><br/>${p.marker} Lluvia: <b>${num(p.value[1], 1)} mm</b> (${p.data.n} registros)`
-          : `<b>${fDateTime(new Date(p.value[0]).toISOString())}</b><br/>${p.marker} Nivel: <b>${num(p.value[1])} m</b>`).join("<br/>") + `<br/><span style="opacity:.7">Fuente: INA</span>` },
+          : p.seriesIndex === 2 ? `<b>${fDate(new Date(p.value[0]).toISOString())}</b><br/>Sin registros de lluvia ese día (no es 0 mm)`
+          : `<b>${fDateTime(new Date(p.value[0]).toISOString())} ART</b><br/>${p.marker} Escala: <b>${num(p.value[1])} m</b>`).join("<br/>") + `<br/><span style="opacity:.7">Fuente: INA</span>` },
       series: [
         { type: "bar", xAxisIndex: 0, yAxisIndex: 0, barMaxWidth: 10, itemStyle: { color: cssVar("var(--s1)"), borderRadius: [3, 3, 0, 0] },
-          data: bars.map((b) => ({ value: [new Date(b.date + "T12:00:00-03:00").getTime(), b.mm], n: b.n })) },
+          data: bars.filter((b) => b.mm != null).map((b) => ({ value: [new Date(b.date + "T12:00:00-03:00").getTime(), b.mm], n: b.n })) },
         { type: "line", xAxisIndex: 1, yAxisIndex: 1, showSymbol: false, lineStyle: { width: 2, color: hydroKey ? stationColor(hydroKey) : muted }, itemStyle: { color: hydroKey ? stationColor(hydroKey) : muted }, data: level },
+        { name: "sin registros", type: "scatter", xAxisIndex: 0, yAxisIndex: 0, symbol: "rect", symbolSize: [6, 3], itemStyle: { color: muted, opacity: 0.6 },
+          data: bars.filter((b) => b.mm == null).map((b) => ({ value: [new Date(b.date + "T12:00:00-03:00").getTime(), 0] })) },
       ],
     };
   }, [bars, level, days, hydroName]);
@@ -69,7 +72,10 @@ export function RainPanel({ rain, stations }: { rain: any; stations: Station[] }
             ))}
           </tbody>
         </table>
-        <div className="src" style={{ marginTop: 8 }}>{rain?.note} Tecka y Cerro Cóndor no tienen pluviómetro en el INA.</div>
+        <div className="src" style={{ marginTop: 8 }}>
+          CALCULADO: suma de los registros de precipitación del INA cuyo cierre cae dentro de la ventana. El INA no publica el intervalo que cubre cada registro
+          (en algunas estaciones hay registros cada 4 h con un hueco nocturno), así que "24 h" puede incluir lluvia caída un poco antes. "Sin datos" = no hubo registros válidos: nunca se muestra como 0 mm.
+          Tecka y Cerro Cóndor no tienen pluviómetro en el INA.</div>
       </div>
 
       <div className="card">

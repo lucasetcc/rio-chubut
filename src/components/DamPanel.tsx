@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { api, Station } from "../api";
-import { cm, fDateTime, num, signed } from "../fmt";
+import { cm, fDateTime, num, safeUrl, signed } from "../fmt";
+import { localDate } from "../data/analytics";
+import damRef from "../data/dam_reference.json";
 
 const LABEL: Record<string, string> = {
   cota: "Cota del embalse", volumen: "Volumen almacenado", almacenamiento_pct: "Porcentaje de almacenamiento",
@@ -13,9 +15,21 @@ const WHY_ND: Record<string, string> = {
 };
 const ageTxt = (d: number) => (d < 1 ? "hoy" : d < 2 ? "hace 1 día" : `hace ${Math.round(d)} días`);
 const metres = (m: number | null | undefined) => (m == null ? "—" : `${m > 0 ? "+" : m < 0 ? "−" : "±"}${Math.abs(m).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} m`);
+const sgn = (m: number) => `${m > 0 ? "+" : m < 0 ? "−" : "±"}${Math.abs(m).toLocaleString("es-AR", { maximumFractionDigits: 0 })}`;
+/** Diferencia respetando la precisión del dato: cota "aprox." → metros enteros con ≈; referencia en rango → rango. */
+const diff = (m: number | null | undefined, approx?: boolean, range?: [number, number] | null, cota?: number | null) => {
+  if (m == null) return "—";
+  if (range && cota != null) {
+    const a = cota - range[1], b = cota - range[0];
+    return approx ? `≈ ${sgn(Math.round(a))} a ${sgn(Math.round(b))} m` : `${metres(a).replace(/ m$/, "")} a ${metres(b)}`;
+  }
+  return approx ? `≈ ${sgn(Math.round(m))} m` : metres(m);
+};
+const GEN_RANGE = ((damRef as any).references.find((r: any) => r.key === "cota_min_generacion")?.range ?? null) as [number, number] | null;
 
 function SourceLink({ r }: { r: any }) {
-  return r.source_url || r.url ? <a href={r.source_url || r.url} target="_blank" rel="noreferrer">{r.source} ↗</a> : <>{r.source}</>;
+  const href = safeUrl(r.source_url || r.url);
+  return href ? <a href={href} target="_blank" rel="noreferrer noopener">{r.source} ↗</a> : <>{r.source}</>;
 }
 
 export function DamSummary({ dam, stations }: { dam: any; stations: Station[] }) {
@@ -28,11 +42,11 @@ export function DamSummary({ dam, stations }: { dam: any; stations: Station[] })
       <h4 style={{ letterSpacing: ".08em", textTransform: "uppercase", fontSize: 12 }}>Dique Florentino Ameghino</h4>
       <dl className="kv" style={{ gridTemplateColumns: "auto auto" }}>
         <dt>Cota</dt>
-        <dd>{cota?.available ? <><b>{num(cota.last.value)} m</b> <span className="small muted">{cota.last.ts_local} · {ageTxt(cota.age_days)}</span></> : <span className="nodata">Sin datos públicos</span>}</dd>
-        {st && <><dt>vs máxima normal (166 m)</dt><dd>{metres(st.vs_max)}</dd>
-          <dt>vs límite de generación</dt><dd>{metres(st.vs_gen)}</dd></>}
+        <dd>{cota?.available ? <><b>{num(cota.last.value, cota.last.approx ? 0 : 2)} m{cota.last.approx ? " aprox." : ""}</b> <span className="small muted">prensa · {cota.last.ts_local} · {ageTxt(cota.age_days)}</span></> : <span className="nodata">Sin datos públicos</span>}</dd>
+        {st && <><dt>vs cota máxima normal ({num(dam.cota_max_normal, 0)} m)</dt><dd>{diff(st.vs_max, cota?.last?.approx)}</dd>
+          <dt>vs límite de generación</dt><dd>{diff(st.vs_gen, cota?.last?.approx, GEN_RANGE, st.cota)}</dd></>}
         <dt>Salida</dt>
-        <dd>{dam?.variables?.caudal_saliente?.available ? <>{num(dam.variables.caudal_saliente.last.value, 0)} m³/s <span className="small muted">{dam.variables.caudal_saliente.last.ts_local}</span></> : <span className="nodata">N/D</span>}</dd>
+        <dd>{dam?.variables?.caudal_saliente?.available && !dam.variables.caudal_saliente.expired ? <>{num(dam.variables.caudal_saliente.last.value, 0)} m³/s <span className="small muted">consigna · {dam.variables.caudal_saliente.last.ts_local}</span></> : <span className="nodata">N/D (último dato &gt; 30 días)</span>}</dd>
         <dt>Aporte del río</dt>
         <dd>{plumas?.level ? <>Las Plumas 24 h {cm(plumas.level.changes["24h"]?.delta_m)} <span className="small muted">(nivel, INA)</span></> : <span className="nodata">sin datos</span>}</dd>
         <dt>Río aguas abajo</dt>
@@ -44,7 +58,7 @@ export function DamSummary({ dam, stations }: { dam: any; stations: Station[] })
 }
 
 export function DamPanel({ dam, stations, reload, admin }: { dam: any; stations: Station[]; reload: () => void; admin?: boolean }) {
-  const [form, setForm] = useState({ ts: new Date().toISOString().slice(0, 10), variable: "cota", value: "", source: "", source_url: "", note: "" });
+  const [form, setForm] = useState({ ts: localDate(Date.now()), variable: "cota", value: "", source: "", source_url: "", note: "" });
   const [err, setErr] = useState<string | null>(null);
   if (!dam) return null;
   const below = stations.find((s) => s.key === "ameghino_abajo");
@@ -62,16 +76,16 @@ export function DamPanel({ dam, stations, reload, admin }: { dam: any; stations:
       {/* estado actual */}
       <div className="kpis">
         <div className="kpi"><div className="k">Cota del embalse</div>
-          <div className="v">{st ? num(st.cota) : "N/D"}<small> m</small></div>
+          <div className="v">{st ? num(st.cota, V.cota.last.approx ? 0 : 2) : "N/D"}<small> m{V.cota.last?.approx ? " aprox." : ""}</small></div>
           <div className="d">{st ? <>{V.cota.last.ts_local} · {ageTxt(st.age_days)} · {V.cota.last.quality}</> : "no publicado"}</div></div>
         <div className="kpi"><div className="k">vs cota máxima normal</div>
-          <div className="v" style={{ color: "var(--fall)" }}>{st ? metres(st.vs_max) : "—"}</div>
+          <div className="v" style={{ color: "var(--fall)" }}>{st ? diff(st.vs_max, V.cota.last?.approx) : "—"}</div>
           <div className="d">vertedero {num(dam.cota_max_normal)} m</div></div>
         <div className="kpi"><div className="k">vs límite de generación</div>
-          <div className="v">{st ? metres(st.vs_gen) : "—"}</div>
+          <div className="v">{st ? diff(st.vs_gen, V.cota.last?.approx, GEN_RANGE, st.cota) : "—"}</div>
           <div className="d">informado: {refRow("cota_min_generacion")?.display}</div></div>
         <div className="kpi"><div className="k">vs mínimo histórico</div>
-          <div className="v">{st ? metres(st.vs_min_hist) : "—"}</div>
+          <div className="v">{st ? diff(st.vs_min_hist, V.cota.last?.approx) : "—"}</div>
           <div className="d">{num(refRow("cota_min_historica")?.value)} m (1988)</div></div>
       </div>
       {st && (st.age_days > 14 || st.trend_note) && (
@@ -102,8 +116,9 @@ export function DamPanel({ dam, stations, reload, admin }: { dam: any; stations:
               {Object.entries(V).map(([k, v]: [string, any]) => (
                 <tr key={k}>
                   <td>{LABEL[k]}</td>
-                  {v.available ? <>
-                    <td className="n"><b>{num(v.last.value, k === "cota" ? 2 : 0)} {v.unit}</b></td>
+                  {v.available && v.expired ? <td colSpan={5} className="nodata">N/D — último dato publicado {v.last.ts_local} ({ageTxt(v.age_days)}): {num(v.last.value, 0)} {v.unit}{v.last.note ? ` (${v.last.note})` : ""}. <SourceLink r={v.last} /></td>
+                  : v.available ? <>
+                    <td className="n"><b>{num(v.last.value, k === "cota" && !v.last.approx ? 2 : 0)} {v.unit}{v.last.approx ? " aprox." : ""}</b></td>
                     {["24h", "7d", "30d"].map((w) => <td key={w} className="n">{fmtChange(k, v, w)}</td>)}
                     <td className="small">{v.last.ts_local} · <SourceLink r={v.last} />{v.last.note ? <div className="muted">{v.last.note}</div> : null}
                       {admin && v.last.quality === "MANUAL" && <button className="small" style={{ marginLeft: 6 }} onClick={async () => { try { await api.delDam(v.last.id); reload(); } catch (e) { alert(String(e)); } }}>borrar</button>}</td>
@@ -153,7 +168,7 @@ export function DamPanel({ dam, stations, reload, admin }: { dam: any; stations:
                 <tr key={r.id}>
                   <td className="small">{r.ts_local}</td>
                   <td className="small">{LABEL[r.variable] || r.variable}</td>
-                  <td className="n"><b>{num(r.value, r.variable === "cota" ? 2 : 0)} {r.unit}</b>{r.approx && <span className="muted small"> aprox.</span>}</td>
+                  <td className="n"><b>{num(r.value, r.variable === "cota" && !r.approx ? 2 : 0)} {r.unit}</b>{r.approx && <span className="muted small"> aprox.</span>}</td>
                   <td className="small"><SourceLink r={r} /> <span className="muted">· {r.quality}</span>{r.note ? <div className="muted">{r.note}</div> : null}</td>
                 </tr>
               ))}

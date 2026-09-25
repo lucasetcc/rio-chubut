@@ -11,12 +11,12 @@
   --line-2: #2c3d50;
   --text: #e8eef4;
   --text-2: #aab8c6;
-  --muted: #708090;
+  --muted: #8b99a7;
   --accent: #3b8ff0;
   --accent-soft: rgba(59, 143, 240, .14);
   --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
   --s5: #d55181; --s6: #2fa84f; --s7: #9085e9; --s8: #e66767;
-  --ok: #2fbf7f; --rise: #4a9bff; --fall: #f0913a; --flood: #ef4b52; --stale: #7b8794;
+  --ok: #2fbf7f; --rise: #4a9bff; --fall: #f0913a; --flood: #ef4b52; --stale: #7b8794; --neutral: #9fb2c6;
   --pos: #4a9bff; --neg: #f0913a;
   --shadow: 0 1px 0 rgba(255,255,255,.03) inset, 0 8px 24px rgba(0,0,0,.25);
   --radius: 14px;
@@ -30,7 +30,7 @@
   --text: #0f1720; --text-2: #3c4a58; --muted: #6a7785;
   --accent: #1f6fd1; --accent-soft: rgba(31, 111, 209, .10);
   --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #d99400; --s5: #e0679a; --s6: #1f9446; --s7: #4a3aa7; --s8: #e34948;
-  --ok: #17995f; --rise: #1f6fd1; --fall: #d9730d; --flood: #d92d35; --stale: #8b949e;
+  --ok: #17995f; --rise: #1f6fd1; --fall: #d9730d; --flood: #d92d35; --stale: #8b949e; --neutral: #5d7087;
   --pos: #1f6fd1; --neg: #d9730d;
   --shadow: 0 1px 2px rgba(15, 23, 32, .06), 0 6px 20px rgba(15, 23, 32, .05);
 }
@@ -143,8 +143,8 @@ section > h2 .hint { text-transform: none; letter-spacing: 0; font-weight: 400; 
 .badge { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; font-size: 11px; letter-spacing: .06em; padding: 3px 8px; border-radius: 999px; white-space: nowrap;
   color: var(--c); background: color-mix(in srgb, var(--c) 14%, transparent); }
 .badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--c); }
-.b-stable { --c: var(--ok); } .b-rising { --c: var(--rise); } .b-falling { --c: var(--fall); }
-.b-flood { --c: var(--flood); }
+.b-stable { --c: var(--ok); } .b-rising { --c: var(--rise); } .b-falling { --c: var(--neutral); }
+.b-over { --c: var(--flood); }
 .b-stale, .b-nodata, .b-unknown, .b-init { --c: var(--stale); }
 .stale-note { color: var(--fall); font-size: 11.5px; }
 .up { color: var(--pos); } .down { color: var(--neg); }
@@ -228,3 +228,16 @@ nav.sections a.on { background: var(--accent-soft); color: var(--text); }
 .fcmini .nm { color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fcmini .bar { height: 8px; background: var(--panel-3); border-radius: 6px; overflow: hidden; }
 .fcmini .bar i { display: block; height: 100%; background: var(--s1); border-radius: 6px; }
+
+/* rótulos de origen del dato */
+.tag { display: inline-block; font-size: 9.5px; font-weight: 700; letter-spacing: .08em; padding: 1px 6px; border-radius: 4px; vertical-align: middle; white-space: nowrap; border: 1px solid; }
+.tag-med { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
+.tag-calc { color: var(--neutral); border-color: color-mix(in srgb, var(--neutral) 45%, transparent); }
+.tag-est { color: #c9a0ff; border-color: #c9a0ff66; }
+.tag-pub { color: var(--fall); border-color: color-mix(in srgb, var(--fall) 45%, transparent); }
+/* estados de la tarjeta */
+.st-card .when { font-size: 12px; color: var(--text-2); margin-top: 4px; }
+.st-card.is-stale .big, .st-card.is-stale .deltas b { color: var(--muted) !important; }
+.state { margin-top: 12px; font-size: 13px; padding: 8px 10px; border-radius: 8px; background: var(--panel-2); }
+.state.err { color: var(--fall); }
+.state.small { font-size: 11.5px; margin-top: 6px; padding: 5px 8px; }

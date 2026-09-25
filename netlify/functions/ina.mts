@@ -14,6 +14,21 @@
  * <bucket> es un número que cambia cada 10 min (lo calcula el navegador) -> define la vigencia del cache.
  */
 import type { Config } from "@netlify/functions";
+import { getStore } from "@netlify/blobs";
+import seed from "../../src/data/stations.json";
+import { okBucket } from "../lib/validate";
+
+const SEED_IDS = new Set<number>((seed as any).stations.flatMap((s: any) => s.series.map((x: any) => x.id)));
+const TERMS = new Set<string>(((seed as any).discovery?.search_terms || []).map((t: string) => t.toLowerCase()));
+
+/** Sólo se sirven series del catálogo o agregadas desde la configuración (evita usar el proxy para cualquier serie). */
+async function allowedSeries(id: number): Promise<boolean> {
+  if (SEED_IDS.has(id)) return true;
+  try {
+    const st: any = await getStore({ name: "rio-chubut" }).get("settings", { type: "json" });
+    return !!st?.extra_series?.some((x: any) => x.series_id === id);
+  } catch { return false; }
+}
 
 const BASE = "https://alerta.ina.gob.ar/a5/obs/puntual";
 const UA = "rio-chubut-monitor/1.0 (monitoreo hidrologico; cache 10 min)";
@@ -50,13 +65,17 @@ const NOCACHE = "no-store";
 export default async (req: Request) => {
   const parts = new URL(req.url).pathname.replace(/^\/api\/ina\/?/, "").split("/").filter(Boolean);
   try {
-    const [kind, a, b] = parts;
-    if (kind === "meta" && /^\d+$/.test(a)) {
+    const [kind, a, b, c] = parts;
+    if ((kind === "meta" || kind === "obs") && (!/^\d{1,7}$/.test(a || "") || !(await allowedSeries(Number(a)))))
+      return json({ error: "serie no permitida" }, 404, NOCACHE);
+    if (kind === "meta" && !okBucket(b, 3600e3)) return json({ error: "bucket inválido" }, 400, NOCACHE);
+    if (kind === "obs" && b === "recent" && !okBucket(c, 600e3)) return json({ error: "bucket inválido" }, 400, NOCACHE);
+    if (kind === "meta") {
       const d = await ina(`${BASE}/series/${a}`);
       if (d.__error) return json({ error: d.__error }, 502, NOCACHE);
       return json(d, 200, "public, durable, s-maxage=3600, stale-while-revalidate=86400");
     }
-    if (kind === "obs" && /^\d+$/.test(a)) {
+    if (kind === "obs") {
       const now = new Date();
       let start: string, end: string, cdn: string;
       const qStart = (y: number, q: number) => new Date(Date.UTC(y, (q - 1) * 3, 1)).toISOString().replace(/\.\d{3}Z$/, "Z");
@@ -66,7 +85,7 @@ export default async (req: Request) => {
         start = qStart(now.getUTCFullYear(), curQ);
         end = new Date(now.getTime() + 3600e3).toISOString().replace(/\.\d{3}Z$/, "Z");
         cdn = SHORT;
-      } else if (m && Number(m[1]) > 1990 && (Number(m[1]) < now.getUTCFullYear() || (Number(m[1]) === now.getUTCFullYear() && Number(m[2]) < curQ))) {
+      } else if (m && Number(m[1]) >= 2000 && (Number(m[1]) < now.getUTCFullYear() || (Number(m[1]) === now.getUTCFullYear() && Number(m[2]) < curQ))) {
         const y = Number(m[1]), q = Number(m[2]);
         start = qStart(y, q);
         end = q === 4 ? qStart(y + 1, 1) : qStart(y, q + 1);
@@ -82,12 +101,12 @@ export default async (req: Request) => {
       const bad = rows.length - slim.length;
       return json({ series_id: Number(a), from: start, to: end, fetched_at: now.toISOString(), bad_format: bad, data: slim }, 200, cdn);
     }
-    if (kind === "estaciones" && a) {
+    if (kind === "estaciones" && a && TERMS.has(decodeURIComponent(a).toLowerCase())) {
       const d = await ina(`${BASE}/estaciones?nombre=${encodeURIComponent(decodeURIComponent(a))}`);
       if (d?.__error) return json({ error: d.__error }, 502, NOCACHE);
       return json(d, 200, "public, durable, s-maxage=86400");
     }
-    if (kind === "series-estacion" && /^\d+$/.test(a)) {
+    if (kind === "series-estacion" && /^\d{1,6}$/.test(a || "")) {
       const d = await ina(`${BASE}/series?estacion_id=${a}`);
       if (d?.__error) return json({ error: d.__error }, 502, NOCACHE);
       return json(d, 200, "public, durable, s-maxage=86400");

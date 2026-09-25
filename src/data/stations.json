@@ -255,6 +255,73 @@
           "var_id": 27
         }
       ]
+    },
+    {
+      "key": "norquinco",
+      "name": "Ñorquinco",
+      "river": "Río Chico – cuenca alta (afluente del Chubut, Río Negro)",
+      "kind": "hydro",
+      "main": false,
+      "chain_order": null,
+      "ina_station_id": 6640,
+      "lat": -41.842,
+      "lon": -70.891,
+      "notes": "Tributario. No está en la línea principal del Río Chubut. Datos desde 09/2024.",
+      "series": [
+        {
+          "id": 33516,
+          "role": "level",
+          "var_id": 2
+        },
+        {
+          "id": 33920,
+          "role": "rain",
+          "var_id": 27
+        }
+      ]
+    },
+    {
+      "key": "gualjaina_rio",
+      "name": "Río Gualjaina (Gualjaina)",
+      "river": "Río Gualjaina (afluente, llega al Chubut en Gualjaina)",
+      "kind": "hydro",
+      "main": false,
+      "chain_order": null,
+      "ina_station_id": 2606,
+      "lat": -42.65,
+      "lon": -70.44,
+      "notes": "Tributario (recibe al Tecka y al Lepá). No es la estación del Río Chubut en Gualjaina.",
+      "series": [
+        {
+          "id": 8242,
+          "role": "level",
+          "var_id": 2
+        },
+        {
+          "id": 8821,
+          "role": "rain",
+          "var_id": 27
+        }
+      ]
+    },
+    {
+      "key": "chico_ameghino",
+      "name": "Río Chico – Ameghino",
+      "river": "Río Chico (afluente, desemboca en el embalse Ameghino)",
+      "kind": "hydro",
+      "main": false,
+      "chain_order": null,
+      "ina_station_id": 7257,
+      "lat": -44.477,
+      "lon": -66.912,
+      "notes": "Tributario del embalse, casi siempre seco. El INA solo tiene 6 días de datos (junio 2025).",
+      "series": [
+        {
+          "id": 36883,
+          "role": "level",
+          "var_id": 2
+        }
+      ]
     }
   ],
   "discovery": {
@@ -268,7 +335,8 @@
       "Paso del Sapo",
       "Los Altares",
       "Las Plumas",
-      "Cerro Condor"
+      "Cerro Condor",
+      "Norquinco"
     ],
     "exclude_station_ids": [
       8240,

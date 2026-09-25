@@ -1,4 +1,4 @@
-import ReactECharts from "echarts-for-react";
+import ReactECharts from "./EChart";
 import { cssVar, fDateTime, num } from "../fmt";
 
 export function FloodPanel({ floods }: { floods: any[] }) {
@@ -7,7 +7,7 @@ export function FloodPanel({ floods }: { floods: any[] }) {
   const avg = msgs.filter((x) => x.avg);
   return (
     <div className="card">
-      <h4>Detección automática de crecidas</h4>
+      <h4>Subidas detectadas <span className="tag tag-calc">CRITERIO PROPIO</span></h4>
       {main.length === 0 ? <div className="msg info">No se detectan subidas rápidas ni sostenidas en las estaciones con datos.</div>
         : main.map((x, i) => <div key={i} className={`msg ${x.warn ? "warn" : "info"}`}>{x.m}</div>)}
       {avg.length > 0 && (
@@ -18,11 +18,12 @@ export function FloodPanel({ floods }: { floods: any[] }) {
       )}
       <div className="tablewrap" style={{ marginTop: 10 }}>
         <table>
-          <thead><tr><th>Estación</th><th className="n">6 h</th><th className="n">12 h</th><th className="n">24 h</th><th className="n">cm/h</th><th className="n">cm/día</th><th>Rápida</th><th>Sostenida</th><th className="n">Máx 24 h</th><th className="n">Máx 7 d</th><th className="n">Máx 30 d</th></tr></thead>
+          <thead><tr><th>Estación</th><th>Último dato</th><th className="n">6 h</th><th className="n">12 h</th><th className="n">24 h</th><th className="n">cm/h</th><th className="n">cm/día</th><th>Rápida</th><th>Sostenida</th><th className="n">Máx 24 h</th><th className="n">Máx 7 d</th><th className="n">Máx 30 d</th></tr></thead>
           <tbody>
             {floods.map((f) => (
               <tr key={f.key}>
                 <td>{f.name}</td>
+                <td className={`small ${f.stale ? "stale-note" : "muted"}`}>{fDateTime(f.last_ts)}{f.stale ? " · sin actualizar" : ""}</td>
                 {["6h", "12h", "24h"].map((k) => <td key={k} className="n">{f.rise_cm[k] == null ? "—" : `${f.rise_cm[k] > 0 ? "+" : ""}${num(f.rise_cm[k], 0)} cm`}</td>)}
                 <td className="n">{num(f.rate_cm_h, 2)}</td>
                 <td className="n">{num(f.rate_cm_day, 1)}</td>
@@ -34,7 +35,7 @@ export function FloodPanel({ floods }: { floods: any[] }) {
           </tbody>
         </table>
       </div>
-      <div className="disclaimer">{floods[0]?.disclaimer || "Superar un promedio no implica emergencia."} “Rápida”: subida en 6 h ≥ umbral configurado; “sostenida”: ≥75 % de los pasos en ascenso en 24 h y subida ≥ umbral. ● = el máximo es el dato actual.</div>
+      <div className="disclaimer">Criterio propio, no oficial. Superar un promedio no implica emergencia. Estaciones sin actualizar no se evalúan. “Rápida”: subida en 6 h ≥ umbral configurado; “sostenida”: ≥75 % de los pasos en ascenso en 24 h y subida ≥ umbral. ● = el máximo es el dato actual.</div>
     </div>
   );
 }
@@ -68,7 +69,7 @@ export function PropagationPanel({ prop }: { prop: any }) {
                   {pairs[i].ok ? <>
                     <span><b>{pairs[i].lag_range_h[0]}–{pairs[i].lag_range_h[1]} h</b></span>
                     <div className="line" />
-                    <span className="muted">r = {num(pairs[i].r, 2)} · {pairs[i].confidence}</span>
+                    <span className="muted">r = {num(pairs[i].r, 2)}</span>
                   </> : <><span className="muted">sin estimar</span><div className="line" /><span className="muted small">{pairs[i].reason}</span></>}
                 </div>
               )}
@@ -76,7 +77,7 @@ export function PropagationPanel({ prop }: { prop: any }) {
           ))}
         </div>
         {prop.excluded?.length > 0 && <div className="small muted">Fuera de la cadena (sin datos recientes): {prop.excluded.map((e: any) => e.name).join(", ")}.</div>}
-        <h4 style={{ margin: "12px 0 6px", fontSize: 13 }}>Señales actuales</h4>
+        <h4 style={{ margin: "12px 0 6px", fontSize: 13 }}>Señales actuales <span className="tag tag-est">ESTIMADO</span></h4>
         {prop.signals.length === 0 ? <div className="msg info">No hay señales de subida en curso en la cadena principal.</div>
           : prop.signals.map((s: any) => (
             <div key={s.station} className="msg">
