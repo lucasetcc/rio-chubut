@@ -85,10 +85,7 @@ export function StationCard({ s }: { s: Station }) {
           <div className="deltas">
             <div><span>6 h</span><Delta m={ch["6h"]?.delta_m} /></div>
             <div><span>24 h</span><Delta m={ch["24h"]?.delta_m} /></div>
-            <div><span>7 d</span><Delta m={ch["7d"]?.delta_m} /></div>
-            <div><span>30 d</span><Delta m={ch["30d"]?.delta_m} /></div>
-            <div><span>1 h</span>{ch["1h"]?.delta_m == null ? <b className="muted" title={ch["1h"]?.reason}>n/d</b> : <Delta m={ch["1h"].delta_m} />}</div>
-            <div><span>vs 30 d</span><Delta m={s.stats_brief?.comparisons?.["30d"]} /></div>
+            <div><span>7 días</span><Delta m={ch["7d"]?.delta_m} /></div>
           </div>
           <div className="foot">
             <span title={fDateTime(lv.ts)}>{fDateTime(lv.ts).slice(0, 5)} {fDateTime(lv.ts).slice(-5)} · {ago(lv.ts)}</span>

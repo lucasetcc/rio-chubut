@@ -64,3 +64,23 @@ export function ForecastPanel({ fc, err }: { fc: any; err: string | null }) {
     </div>
   );
 }
+
+/** Versión corta para el resumen: total a 3 días por lugar, en barras simples. */
+export function ForecastMini({ fc }: { fc: any }) {
+  if (!fc?.stations) return <div className="muted small">Cargando…</div>;
+  const rows = fc.stations.filter((s: any) => s.daily).map((s: any) => ({ name: s.name.replace(/ \(.*\)| – .*/g, ""), mm: sum(s.daily.precipitation_sum, 3) as number,
+    snow: sum(s.daily.snowfall_sum, 3) as number }));
+  const max = Math.max(10, ...rows.map((r: any) => r.mm));
+  return (
+    <div className="fcmini">
+      {rows.map((r: any) => (
+        <div key={r.name} className="fcrow">
+          <span className="nm">{r.name}</span>
+          <span className="bar"><i style={{ width: `${(r.mm / max) * 100}%` }} /></span>
+          <b>{num(r.mm, 1)} mm</b>{r.snow > 0 ? <span className="muted small"> ❄</span> : null}
+        </div>
+      ))}
+      <div className="src" style={{ marginTop: 6 }}>Pronóstico de modelos (Open-Meteo), no medición.</div>
+    </div>
+  );
+}

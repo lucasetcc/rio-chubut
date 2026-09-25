@@ -4,7 +4,7 @@ import { AlertsPanel, ConfigPanel, ExportPanel, SystemPanel } from "./components
 import { LevelChart } from "./components/Charts";
 import { DamPanel, DamSummary } from "./components/DamPanel";
 import { MapPanel } from "./components/MapPanel";
-import { ForecastPanel, forecastTop } from "./components/Forecast";
+import { ForecastMini, ForecastPanel, forecastTop } from "./components/Forecast";
 import { Headline, Kpis, RiverProfile } from "./components/Overview";
 import { FloodPanel, PropagationPanel } from "./components/Propagation";
 import { RainPanel } from "./components/RainPanel";
@@ -13,10 +13,7 @@ import { StatsPanel } from "./components/StatsPanel";
 import { S } from "./data/engine";
 import { ago, fDateTime } from "./fmt";
 
-const NAV = [
-  ["estado", "Estado"], ["graficos", "Evolución"], ["comparacion", "Promedios"], ["lluvia", "Lluvia"], ["pronostico", "Pronóstico"],
-  ["propagacion", "Propagación"], ["mapa", "Mapa"], ["dique", "Dique"], ["alertas", "Alertas"], ["datos", "Datos"],
-];
+const TABS = [["resumen", "Resumen"], ["evolucion", "Evolución"], ["lluvia", "Lluvia"], ["crecidas", "Crecidas"], ["mapa", "Mapa"], ["dique", "Dique"]];
 
 const Logo = () => (
   <span className="logo" aria-hidden>
@@ -36,6 +33,9 @@ function useTheme() {
   return [theme, () => setTheme(theme === "dark" ? "light" : "dark")] as const;
 }
 
+// Configuración, exportación y estado técnico: sólo con ?admin en la dirección
+const ADMIN = typeof location !== "undefined" && new URLSearchParams(location.search).has("admin");
+
 export default function App() {
   const [stations, setStations] = useState<Station[] | null>(null);
   const [status, setStatus] = useState<any>(null);
@@ -51,6 +51,14 @@ export default function App() {
   const [fcErr, setFcErr] = useState<string | null>(null);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [theme, toggleTheme] = useTheme();
+  const readTab = () => { const h = location.hash.replace("#", ""); return [...TABS.map((t) => t[0]), "admin"].includes(h) ? h : "resumen"; };
+  const [tab, setTab] = useState<string>(readTab);
+  useEffect(() => {
+    const f = () => { setTab(readTab()); window.scrollTo(0, 0); };
+    window.addEventListener("hashchange", f);
+    return () => window.removeEventListener("hashchange", f);
+  }, []);
+  const go = (t: string) => { location.hash = t; };
   const [, force] = useState(0);
 
   const load = useCallback(async () => {
@@ -110,8 +118,8 @@ export default function App() {
         <div className="wrap">
           <div className="brand"><Logo /><div><b>Río Chubut</b><small>Monitor hidrológico</small></div></div>
           <nav className="sections">
-            {NAV.map(([id, l]) => (
-              <a key={id} href={`#${id}`}>{l}{id === "alertas" && activeAlerts.length ? <span className="count">{activeAlerts.length}</span> : null}</a>
+            {[...TABS, ...(ADMIN ? [["admin", "Admin"]] : [])].map(([id, l]) => (
+              <a key={id} href={`#${id}`} className={tab === id ? "on" : ""}>{l}{id === "crecidas" && activeAlerts.length ? <span className="count">{activeAlerts.length}</span> : null}</a>
             ))}
           </nav>
           <span className={`live ${liveCls}`} title={status?.overall?.label}><span className="dot" /><span className="txt">Datos INA en vivo</span></span>
@@ -120,93 +128,105 @@ export default function App() {
       </header>
 
       <main className="wrap">
-        <section id="estado" style={{ marginTop: 22 }}>
-          <div className="hero card">
-            <div>
-              <h1>Estado del Río Chubut</h1>
-              <Headline main={main} prop={prop} fcTop={forecastTop(fc)} />
-              <div className="meta">
-                {status?.overall?.label} · Último dato: <b>{status?.last_data_local || "—"}</b>{status?.last_data_ts && ` (${ago(status.last_data_ts)})`}
-                {" · "}Actualizado: {status?.collector?.last_cycle?.at ? fDateTime(status.collector.last_cycle.at).slice(-5) : "—"}
+        {tab === "resumen" && <>
+          <section style={{ marginTop: 22 }}>
+            <div className="hero card">
+              <div>
+                <h1>Estado del Río Chubut</h1>
+                <Headline main={main} prop={prop} fcTop={forecastTop(fc)} />
+                <div className="meta">
+                  Último dato: <b>{status?.last_data_local || "—"}</b>{status?.last_data_ts && ` (${ago(status.last_data_ts)})`}
+                </div>
+              </div>
+              <div className="row" style={{ justifyContent: "flex-end" }}>
+                {collectMsg && <span className="small muted">{collectMsg}</span>}
+                <button onClick={collect}>↻ Actualizar</button>
               </div>
             </div>
-            <div className="row" style={{ justifyContent: "flex-end" }}>
-              {collectMsg && <span className="small muted">{collectMsg}</span>}
-              <button onClick={collect}>↻ Actualizar</button>
+            {err && <div className="msg crit">{err}</div>}
+            {empty && <div className="msg warn">No llegaron datos del INA. Puede estar caído o lento: la página reintenta sola cada 5 minutos.</div>}
+            {activeAlerts.slice(0, 3).map((a) => <div key={a.id} className="msg warn" style={{ cursor: "pointer" }} onClick={() => go("crecidas")}>{a.message}</div>)}
+            <Kpis status={status} main={main} rain={rain} alerts={alerts} />
+          </section>
+          <section>
+            <h2>El río, de la cabecera al dique <span className="hint">cada estación comparada con su propio nivel normal</span></h2>
+            <RiverProfile main={main} prop={prop} dam={dam} />
+          </section>
+          <section>
+            <h2>Estaciones <span className="hint">número grande = cuánto está por encima o por debajo de lo normal</span></h2>
+            <div className="chain">{main.map((s) => <StationCard key={s.key} s={s} />)}</div>
+          </section>
+          <section>
+            <div className="grid g2">
+              <DamSummary dam={dam} stations={stations} />
+              <div className="card">
+                <h4>Pronóstico de lluvia (3 días)</h4>
+                <ForecastMini fc={fc} />
+                <button className="small" style={{ marginTop: 10 }} onClick={() => go("lluvia")}>Ver pronóstico completo →</button>
+              </div>
             </div>
-          </div>
-          {err && <div className="msg crit">{err}</div>}
-          {empty && <div className="msg warn">No llegaron datos del INA. Puede estar caído o lento: la página reintenta sola cada 5 minutos.</div>}
-          <Kpis status={status} main={main} rain={rain} alerts={alerts} />
-        </section>
+          </section>
+        </>}
 
-        <section>
-          <h2>Perfil de la cuenca <span className="hint">aguas arriba → aguas abajo · cada estación comparada con su propio nivel normal · tiempos de viaje estimados</span></h2>
-          <RiverProfile main={main} prop={prop} dam={dam} />
-        </section>
+        {tab === "evolucion" && <>
+          <section style={{ marginTop: 22 }}>
+            <h2>Evolución del nivel <span className="hint">zoom con rueda o arrastre · superponé estaciones para ver la crecida viajar</span></h2>
+            <LevelChart key={theme} stations={stations} initial={main[0]?.key || "cerro_condor"} />
+          </section>
+          <section>
+            <h2>Comparación con el pasado</h2>
+            <StatsPanel key={theme} stations={stations} selected={statsKey} onSelect={setStatsKey} />
+          </section>
+          <section>
+            <h2>Todas las estaciones</h2>
+            <StationTable stations={[...main, ...others]} />
+          </section>
+        </>}
 
-        <section>
-          <h2>Estaciones principales <span className="hint">número grande = desvío respecto de lo normal de esa estación · la lectura de escala no es profundidad</span></h2>
-          <div className="chain">{main.map((s) => <StationCard key={s.key} s={s} />)}</div>
-          <div className="grid g2" style={{ marginTop: 14 }}>
+        {tab === "lluvia" && <>
+          <section style={{ marginTop: 22 }}>
+            <h2>Pronóstico de lluvia <span className="hint">próximos días · modelos Open-Meteo</span></h2>
+            <ForecastPanel fc={fc} err={fcErr} />
+          </section>
+          <section>
+            <h2>Lluvia medida</h2>
+            <RainPanel key={theme} rain={rain} stations={stations} />
+          </section>
+        </>}
+
+        {tab === "crecidas" && <>
+          <section style={{ marginTop: 22 }}>
+            <h2>Alertas</h2>
+            <AlertsPanel alerts={alerts} reload={load} />
+          </section>
+          <section>
+            <h2>Propagación <span className="hint">estimación estadística, no pronóstico oficial</span></h2>
+            <PropagationPanel key={theme} prop={prop} />
+          </section>
+          <section>
+            <h2>Detección de crecidas</h2>
             <FloodPanel floods={floods} />
-            <DamSummary dam={dam} stations={stations} />
-          </div>
-        </section>
+          </section>
+        </>}
 
-        <section id="tabla">
-          <h2>Todas las estaciones <span className="hint">incluye cabecera, afluentes, pluviómetros y el río aguas abajo del dique</span></h2>
-          <StationTable stations={[...main, ...others]} />
-        </section>
-
-        <section id="graficos">
-          <h2>Evolución <span className="hint">zoom con rueda o arrastre · superponé estaciones para ver la crecida viajar aguas abajo</span></h2>
-          <LevelChart key={theme} stations={stations} initial={main[0]?.key || "cerro_condor"} />
-        </section>
-
-        <section id="comparacion">
-          <h2>Comparación con el pasado</h2>
-          <StatsPanel key={theme} stations={stations} selected={statsKey} onSelect={setStatsKey} />
-        </section>
-
-        <section id="lluvia">
-          <h2>Precipitaciones</h2>
-          <RainPanel key={theme} rain={rain} stations={stations} />
-        </section>
-
-        <section id="pronostico">
-          <h2>Pronóstico de lluvia <span className="hint">próximos días · modelos Open-Meteo</span></h2>
-          <ForecastPanel fc={fc} err={fcErr} />
-        </section>
-
-        <section id="propagacion">
-          <h2>Propagación de la crecida <span className="hint">estimación estadística, no pronóstico oficial</span></h2>
-          <PropagationPanel key={theme} prop={prop} />
-        </section>
-
-        <section id="mapa">
+        {tab === "mapa" && <section style={{ marginTop: 22 }}>
           <h2>Mapa de la cuenca</h2>
           <MapPanel key={theme} stations={stations} rain={rain} dam={dam} />
-        </section>
+        </section>}
 
-        <section id="dique">
+        {tab === "dique" && <section style={{ marginTop: 22 }}>
           <h2>Dique Florentino Ameghino</h2>
-          <DamPanel dam={dam} stations={stations} reload={load} />
-        </section>
+          <DamPanel dam={dam} stations={stations} reload={load} admin={ADMIN} />
+        </section>}
 
-        <section id="alertas">
-          <h2>Alertas</h2>
-          <AlertsPanel alerts={alerts} reload={load} />
-        </section>
-
-        <section id="datos">
+        {tab === "admin" && ADMIN && <section style={{ marginTop: 22 }}>
           <h2>Exportar datos</h2>
           <ExportPanel stations={stations} />
           <h2 style={{ marginTop: 24 }}>Configuración</h2>
           <ConfigPanel stations={stations} reloadAll={load} />
           <h2 style={{ marginTop: 24 }}>Estado de las fuentes</h2>
           <SystemPanel status={status} />
-        </section>
+        </section>}
       </main>
 
       <footer className="foot">

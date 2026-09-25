@@ -43,7 +43,7 @@ export function DamSummary({ dam, stations }: { dam: any; stations: Station[] })
   );
 }
 
-export function DamPanel({ dam, stations, reload }: { dam: any; stations: Station[]; reload: () => void }) {
+export function DamPanel({ dam, stations, reload, admin }: { dam: any; stations: Station[]; reload: () => void; admin?: boolean }) {
   const [form, setForm] = useState({ ts: new Date().toISOString().slice(0, 10), variable: "cota", value: "", source: "", source_url: "", note: "" });
   const [err, setErr] = useState<string | null>(null);
   if (!dam) return null;
@@ -106,7 +106,7 @@ export function DamPanel({ dam, stations, reload }: { dam: any; stations: Statio
                     <td className="n"><b>{num(v.last.value, k === "cota" ? 2 : 0)} {v.unit}</b></td>
                     {["24h", "7d", "30d"].map((w) => <td key={w} className="n">{fmtChange(k, v, w)}</td>)}
                     <td className="small">{v.last.ts_local} · <SourceLink r={v.last} />{v.last.note ? <div className="muted">{v.last.note}</div> : null}
-                      {v.last.quality === "MANUAL" && <button className="small" style={{ marginLeft: 6 }} onClick={async () => { try { await api.delDam(v.last.id); reload(); } catch (e) { alert(String(e)); } }}>borrar</button>}</td>
+                      {admin && v.last.quality === "MANUAL" && <button className="small" style={{ marginLeft: 6 }} onClick={async () => { try { await api.delDam(v.last.id); reload(); } catch (e) { alert(String(e)); } }}>borrar</button>}</td>
                   </> : <td colSpan={5} className="nodata">{WHY_ND[k] || "N/D — no publicado"}</td>}
                 </tr>
               ))}
@@ -161,8 +161,8 @@ export function DamPanel({ dam, stations, reload }: { dam: any; stations: Statio
           </table>
         </div>
 
-        {/* carga manual */}
-        <div className="card">
+        {/* carga manual (sólo modo admin) */}
+        {admin && <div className="card">
           <h4>Cargar un dato oficial nuevo</h4>
           <form className="grid" style={{ gap: 8 }} onSubmit={submit}>
             <div className="row">
@@ -178,7 +178,7 @@ export function DamPanel({ dam, stations, reload }: { dam: any; stations: Statio
             <div className="row"><button className="primary" type="submit">Guardar</button>{err && <span className="err small">{err}</span>}</div>
           </form>
           <div className="src" style={{ marginTop: 8 }}>Unidades: cota m · volumen hm³ · % · caudales m³/s · generación MW. Queda marcado como MANUAL con su fuente y se suma a la cronología.</div>
-        </div>
+        </div>}
       </div>
     </div>
   );
