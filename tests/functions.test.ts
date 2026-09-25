@@ -86,3 +86,15 @@ describe("historia de la red anterior (BDHI)", () => {
     expect(E.extInfo("x")?.used).toBe(false);
   });
 });
+
+describe("proxy GloFAS", () => {
+  it("sólo permite historia de los puntos candidatos", async () => {
+    const m = await import("../netlify/functions/glofas.mts");
+    const c = m.candidates();
+    expect(c.length).toBe(30);
+    const bad = await m.default(new Request("https://x/api/glofas/hist/-10/-60"));
+    expect(bad.status).toBe(404);
+    const badB = await m.default(new Request("https://x/api/glofas/recent/audit-test"));
+    expect(badB.status).toBe(400);
+  });
+});

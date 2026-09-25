@@ -496,6 +496,36 @@ export const api = {
     return extra;
   },
   async ignoreDiscovered(id: number) { return saveSettings({ ignored_series: [...(S.settings.ignored_series || []), id] }); },
+  /** Caudal MODELADO (GloFAS). Se carga sólo al abrir su pestaña; si falla no afecta al resto. */
+  async glofas() {
+    await loadAll();
+    const r = await fetch(`/api/glofas/recent/${Math.floor(Date.now() / (3 * 3600e3))}`);
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(body.error || `HTTP ${r.status}`);
+    const today = localDate(Date.now());
+    const byKey = new Map<string, any[]>();
+    for (const p of body.points) { if (!p.daily) continue; const a = byKey.get(p.key) || []; a.push(p); byKey.set(p.key, a); }
+    const stations = await Promise.all([...byKey.entries()].map(async ([key, pts]) => {
+      const name = S.stations.find((s) => s.key === key)?.name || key;
+      const meanOf = (p: any) => { const v = p.daily.river_discharge.filter((x: any) => x != null); return v.length ? v.reduce((a: number, b: number) => a + b, 0) / v.length : -1; };
+      const best = pts.reduce((a, b) => (meanOf(b) > meanOf(a) ? b : a));
+      try {
+        const h = await (await fetch(`/api/glofas/hist/${best.lat}/${best.lon}`)).json();
+        if (!h.daily) throw new Error(h.error || "sin historia");
+        const a = an.glofasAnalyze(best.daily, h.daily, today);
+        // verificación contra el nivel medido del INA (promedios diarios, desde 2019)
+        const lvl = an.dailyMeans(usable(key, "level", Date.parse("2019-01-01")));
+        const qx: number[] = [], lx: number[] = [];
+        h.daily.time.forEach((t: string, i: number) => { const q = h.daily.river_discharge[i], l = lvl.get(t); if (q != null && l?.mean != null) { qx.push(q); lx.push(l.mean); } });
+        best.daily.time.forEach((t: string, i: number) => { if (t >= (h.daily.time[h.daily.time.length - 1] || "") && t < today) { const q = best.daily.river_discharge[i], l = lvl.get(t); if (q != null && l?.mean != null) { qx.push(q); lx.push(l.mean); } } });
+        const r = an.spearman(qx, lx);
+        return { key, name, glat: best.glat, glon: best.glon, daily: best.daily, ...a, check: { r, n: qx.length, grade: r == null ? "sin datos" : r >= 0.7 ? "buena" : r >= 0.4 ? "regular" : "mala" } };
+      } catch (e) { return { key, name, error: String(e) }; }
+    }));
+    const order = ["el_maiten", "gualjaina", "paso_del_sapo", "cerro_condor", "los_altares", "las_plumas"];
+    stations.sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key));
+    return { source: body.source, fetched_at: body.fetched_at, today, stations };
+  },
   async forecast() {
     const bucket = Math.floor(Date.now() / 1800e3);
     const r = await fetch(`/api/forecast/${bucket}`);

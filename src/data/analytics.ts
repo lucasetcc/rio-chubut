@@ -567,3 +567,36 @@ export function damBalance(qin: { value: number; ts: string } | null, qout: { va
   if (qin.ts.slice(0, 10) !== qout.ts.slice(0, 10)) return null;
   return Math.round(((qin.value - qout.value) * 86400) / 1e3) / 1e3;
 }
+
+// ---------------------------------------------------------------- caudal modelado (GloFAS)
+const doyOf = (s: string) => { const d = Date.parse(s + "T12:00:00Z"); const y = new Date(d).getUTCFullYear(); return Math.floor((d - Date.UTC(y, 0, 0)) / D); };
+const qs = (a: number[], p: number) => { if (!a.length) return null; const b = [...a].sort((x, y) => x - y); const i = (b.length - 1) * p, lo = Math.floor(i); return b[lo] + (b[Math.min(lo + 1, b.length - 1)] - b[lo]) * (i - lo); };
+
+/** Compara el caudal modelado de hoy con el mismo período (±15 días) de todos los años del modelo. */
+export function glofasAnalyze(rec: { time: string[]; river_discharge: (number | null)[]; river_discharge_median?: (number | null)[] },
+  hist: { time: string[]; river_discharge: (number | null)[] }, today: string) {
+  const H2: [string, number, number][] = [];
+  hist.time.forEach((t, i) => { const v = hist.river_discharge[i]; if (v != null && t < today) H2.push([t, doyOf(t), v]); });
+  const win = (dd: number) => H2.filter((r) => { const k = Math.abs(r[1] - dd); return Math.min(k, 365 - k) <= 15; }).map((r) => r[2]);
+  const ti = rec.time.indexOf(today);
+  const now = ti >= 0 ? rec.river_discharge[ti] ?? null : null;
+  const w = win(doyOf(today));
+  const pct = now == null || w.length < 5 * 31 ? null : Math.round((100 * w.filter((v) => v <= now).length) / w.length);
+  const years = new Set(H2.map((r) => r[0].slice(0, 4))).size;
+  const in7 = ti >= 0 ? (rec.river_discharge_median?.[ti + 7] ?? rec.river_discharge[ti + 7] ?? null) : null;
+  const band = rec.time.map((t) => { const v = win(doyOf(t)); return { date: t, p25: qs(v, 0.25), p50: qs(v, 0.5), p75: qs(v, 0.75) }; });
+  const mean = H2.length ? H2.reduce((a, r) => a + r[2], 0) / H2.length : null;
+  return { now, pct, cls: years >= CFG.climClassMinYears ? pctClass(pct) : null, median: qs(w, 0.5), in7, band, mean, years, first_year: H2[0]?.[0].slice(0, 4) ?? null, ti };
+}
+
+/** Correlación de rangos (Spearman): ¿el caudal del modelo sube y baja cuando sube y baja el nivel medido? */
+export function spearman(a: number[], b: number[]): number | null {
+  const n = a.length;
+  if (n < 30 || b.length !== n) return null;
+  const rank = (x: number[]) => { const idx = x.map((v, i) => [v, i]).sort((p, q) => p[0] - q[0]); const r = new Array(n); let i = 0;
+    while (i < n) { let j = i; while (j + 1 < n && idx[j + 1][0] === idx[i][0]) j++; const avg = (i + j) / 2; for (let k = i; k <= j; k++) r[idx[k][1]] = avg; i = j + 1; } return r; };
+  const ra = rank(a), rb = rank(b), ma = (n - 1) / 2;
+  let sab = 0, saa = 0, sbb = 0;
+  for (let i = 0; i < n; i++) { const x = ra[i] - ma, y = rb[i] - ma; sab += x * y; saa += x * x; sbb += y * y; }
+  return saa && sbb ? Math.round((sab / Math.sqrt(saa * sbb)) * 100) / 100 : null;
+}

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CFG, D, H, P, changes, damBalance, floodDetection, lagCorrelation, localDate, propagation, rainDaily, rainSum, rainSummary,
-  stationStats, stationStatus, trend, riseEvents, travelTime, combineMethods,
+  stationStats, stationStatus, trend, riseEvents, travelTime, combineMethods, glofasAnalyze, spearman,
 } from "../src/data/analytics";
 
 const NOW = Date.parse("2026-09-25T03:00:00Z");
@@ -175,5 +175,32 @@ describe("mezcla de métodos", () => {
     const r: any = combineMethods({ ...ev, n_events: 3 }, { ok: true, lag_h: 70, lag_range_h: [68, 72], r: 0.65 });
     expect(r.confidence).toBe("baja");
     expect(r.lag_range_h).toEqual([27, 70]);
+  });
+});
+
+describe("caudal modelado (GloFAS)", () => {
+  const days = (from: string, n: number) => Array.from({ length: n }, (_, i) => new Date(Date.parse(from + "T12:00:00Z") + i * D).toISOString().slice(0, 10));
+  const ht = days("1990-01-01", 35 * 365);
+  const hist = { time: ht, river_discharge: ht.map((t) => 40 + 30 * Math.sin((2 * Math.PI * (Date.parse(t) / D)) / 365.25)) };
+  it("percentil contra el mismo período de todos los años", () => {
+    const rt = days("2026-07-27", 91);
+    const today = "2026-09-25";
+    const rec = { time: rt, river_discharge: rt.map(() => 1e6) };
+    const a = glofasAnalyze(rec, hist, today);
+    expect(a.pct).toBe(100);
+    expect(a.cls?.label).toBe("muy alto");
+    expect(a.years).toBeGreaterThanOrEqual(30);
+  });
+  it("sin historia suficiente no hay clase", () => {
+    const rt = days("2026-07-27", 91);
+    const a = glofasAnalyze({ time: rt, river_discharge: rt.map(() => 5) }, { time: ht.slice(0, 200), river_discharge: hist.river_discharge.slice(0, 200) }, "2026-09-25");
+    expect(a.pct).toBeNull();
+    expect(a.cls).toBeNull();
+  });
+  it("spearman: +1 si suben juntos, −1 si van al revés, null con pocos datos", () => {
+    const a = Array.from({ length: 60 }, (_, i) => i), b = a.map((x) => x * x);
+    expect(spearman(a, b)).toBe(1);
+    expect(spearman(a, b.map((x) => -x))).toBe(-1);
+    expect(spearman([1, 2, 3], [1, 2, 3])).toBeNull();
   });
 });

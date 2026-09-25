@@ -10,6 +10,7 @@ import { ago, fDateTime } from "./fmt";
 
 // Pestañas pesadas (gráficos, mapa, admin) se cargan recién cuando se abren
 const StationDetail = lazy(() => import("./components/StationDetail").then((m) => ({ default: m.StationDetail })));
+const GlofasPanel = lazy(() => import("./components/GlofasPanel").then((m) => ({ default: m.GlofasPanel })));
 const LevelChart = lazy(() => import("./components/Charts").then((m) => ({ default: m.LevelChart })));
 const StatsPanel = lazy(() => import("./components/StatsPanel").then((m) => ({ default: m.StatsPanel })));
 const RainPanel = lazy(() => import("./components/RainPanel").then((m) => ({ default: m.RainPanel })));
@@ -21,7 +22,7 @@ const ConfigPanel = lazy(() => import("./components/AlertsConfig").then((m) => (
 const ExportPanel = lazy(() => import("./components/AlertsConfig").then((m) => ({ default: m.ExportPanel })));
 const SystemPanel = lazy(() => import("./components/AlertsConfig").then((m) => ({ default: m.SystemPanel })));
 
-const TABS = [["resumen", "Resumen"], ["evolucion", "Evolución"], ["lluvia", "Lluvia"], ["crecidas", "Indicadores"], ["mapa", "Mapa"], ["dique", "Dique"]];
+const TABS = [["resumen", "Resumen"], ["evolucion", "Evolución"], ["lluvia", "Lluvia"], ["crecidas", "Indicadores"], ["mapa", "Mapa"], ["dique", "Dique"], ["caudal", "Caudal (modelo)"]];
 
 const Logo = () => (
   <span className="logo" aria-hidden>
@@ -244,6 +245,11 @@ export default function App() {
         {tab === "dique" && <section style={{ marginTop: 22 }}>
           <h2>Dique Florentino Ameghino</h2>
           <DamPanel dam={dam} stations={stations} reload={load} admin={ADMIN} />
+        </section>}
+
+        {tab === "caudal" && <section style={{ marginTop: 22 }}>
+          <h2>Caudal del Río Chubut <span className="hint">modelo GloFAS (Copernicus) · estimación, no medición</span></h2>
+          <GlofasPanel key={theme} />
         </section>}
 
         {tab === "admin" && ADMIN && <section style={{ marginTop: 22 }}>
