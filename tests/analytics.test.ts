@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CFG, D, H, P, changes, damBalance, floodDetection, lagCorrelation, localDate, propagation, rainDaily, rainSum, rainSummary,
-  stationStats, stationStatus, trend,
+  stationStats, stationStatus, trend, riseEvents, travelTime, combineMethods,
 } from "../src/data/analytics";
 
 const NOW = Date.parse("2026-09-25T03:00:00Z");
@@ -130,5 +130,50 @@ describe("propagación", () => {
     const up = series(NOW - 5 * D, 300, 4, (i) => 1 + i * 0.02);
     const p = propagation([{ key: "a", name: "A" }], { a: up }, NOW);
     expect(p.signals).toHaveLength(0);
+  });
+});
+
+describe("tiempo de viaje por crecidas", () => {
+  // crecidas cada ~23 días de distinta magnitud + ciclo diario de deshielo ±5 cm + ruido de 1 cm
+  let seed = 7;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  const floods = Array.from({ length: 14 }, (_, k) => ({ t: NOW - 330 * D + k * 23 * D + rnd() * 5 * D, a: 0.3 + rnd() * 1.5 }));
+  const hydro = (t: number, lagH: number, att: number) =>
+    1 + floods.reduce((s, f) => { const x = (t - f.t - lagH * H) / H; return s + (x < 0 ? f.a * Math.exp(-(x * x) / 200) : f.a * Math.exp(-x / 40)) * att; }, 0);
+  const up = series(NOW, 24 * 90 * 4, 4, (i) => { const t = NOW - (24 * 90 * 4 - 1 - i) * 4 * H; return hydro(t, 0, 1) + 0.05 * Math.sin((2 * Math.PI * t) / D) + Math.round(rnd() * 2) / 100; });
+  const down = series(NOW, 24 * 360, 1, (i) => { const t = NOW - (24 * 360 - 1 - i) * H; return hydro(t, 30, 0.4) + 0.3; });
+  it("detecta las crecidas e ignora el ciclo diario", () => {
+    const ev = riseEvents(up, 0.1);
+    expect(ev.length).toBeGreaterThanOrEqual(12);
+    expect(ev.length).toBeLessThanOrEqual(15);
+  });
+  it("recupera una demora de 30 h entre picos", () => {
+    const r: any = travelTime(riseEvents(up, 0.1), riseEvents(down, 0.03), 120);
+    expect(r.ok).toBe(true);
+    expect(Math.abs(r.lag_h - 30)).toBeLessThanOrEqual(4);
+    expect(r.n_events).toBeGreaterThanOrEqual(10);
+  });
+  it("sin crecidas aguas abajo no inventa un tiempo", () => {
+    const flat = series(NOW, 24 * 360, 1, () => 1);
+    expect((travelTime(riseEvents(up, 0.1), riseEvents(flat, 0.03), 120) as any).ok).toBe(false);
+  });
+});
+
+describe("mezcla de métodos", () => {
+  const ev = { ok: true, lag_h: 30, lag_range_h: [27, 33], n_events: 9, events: [] };
+  it("si coinciden se promedian con confianza alta", () => {
+    const r: any = combineMethods(ev, { ok: true, lag_h: 34, lag_range_h: [32, 36], r: 0.7 });
+    expect(r.method).toBe("crecidas + correlación");
+    expect(r.lag_h).toBe(32);
+    expect(r.confidence).toBe("alta");
+  });
+  it("correlación débil (0,45) sólo sirve para confirmar", () => {
+    expect((combineMethods(ev, { ok: false, lag_h: 31, r: 0.45 }) as any).agree).toBe(true);
+    expect((combineMethods({ ok: false, n_events: 1, reason: "x" }, { ok: false, lag_h: 31, r: 0.45, reason: "y" }) as any).ok).toBe(false);
+  });
+  it("si no coinciden, rango entre ambos y confianza baja", () => {
+    const r: any = combineMethods({ ...ev, n_events: 3 }, { ok: true, lag_h: 70, lag_range_h: [68, 72], r: 0.65 });
+    expect(r.confidence).toBe("baja");
+    expect(r.lag_range_h).toEqual([27, 70]);
   });
 });

@@ -89,12 +89,14 @@ export default function App() {
     const t = setInterval(async () => { if (document.hidden) return; await api.collect().catch(() => {}); load(); }, 5 * 60_000);
     const onVis = () => { if (!document.hidden && Date.now() - S.loadedAt > 5 * 60_000) api.collect().then(load).catch(() => {}); };
     document.addEventListener("visibilitychange", onVis);
+    const onData = () => load();
+    window.addEventListener("rio-data", onData);
     // barra de progreso: sólo mientras se hace la primera carga
     const p = setInterval(() => {
       setProgress((cur) => (cur.done !== S.progress.done || cur.total !== S.progress.total ? { ...S.progress } : cur));
       if (S.loadedAt) clearInterval(p);
     }, 300);
-    return () => { clearInterval(t); clearInterval(p); document.removeEventListener("visibilitychange", onVis); };
+    return () => { clearInterval(t); clearInterval(p); document.removeEventListener("visibilitychange", onVis); window.removeEventListener("rio-data", onData); };
   }, [load]);
 
   // los gráficos leen colores del tema: redibujar al cambiarlo
@@ -117,6 +119,9 @@ export default function App() {
 
   const main = stations.filter((s) => s.main && s.has_level).sort((a, b) => (a.chain_order || 0) - (b.chain_order || 0));
   const others = stations.filter((s) => !s.main);
+  const TRIB_ORDER = ["norquinco", "gualjaina_rio", "tecka", "chico_ameghino"];
+  const tribs = stations.filter((s) => s.kind === "hydro" && !s.main && s.has_level && s.chain_order == null)
+    .sort((a, b) => (TRIB_ORDER.indexOf(a.key) + 99) % 99 - (TRIB_ORDER.indexOf(b.key) + 99) % 99);
   const activeAlerts = alerts.filter((a) => !a.cleared_at);
   const empty = !status?.last_data_ts;
   const liveCls = status?.overall?.code === "ok" ? "" : status?.overall?.code === "error" ? "err" : "warn";
@@ -171,6 +176,10 @@ export default function App() {
             <h2>Estaciones <span className="hint">número grande = lectura de la regla de cada estación (no es profundidad ni se compara entre estaciones)</span></h2>
             <div className="chain">{main.map((s) => <StationCard key={s.key} s={s} />)}</div>
           </section>
+          {tribs.length > 0 && <section>
+            <h2>Afluentes <span className="hint">ríos que desembocan en el Chubut (o en el embalse); anticipan lo que puede llegar</span></h2>
+            <div className="chain">{tribs.map((s) => <StationCard key={s.key} s={s} />)}</div>
+          </section>}
           <section>
             <div className="grid g2">
               <DamSummary dam={dam} stations={stations} />

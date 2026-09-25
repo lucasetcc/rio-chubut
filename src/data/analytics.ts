@@ -11,16 +11,22 @@ export const CFG = {
   staleHours: 24,           // dato más viejo que esto = "sin actualizar": no se calcula estado ni mensajes
   rapidRiseCm6h: 5,
   sustainedRiseCm24h: 5,
-  propagationDays: 365,
+  propagationDays: 3650,    // se usa toda la historia disponible (hasta 10 años)
+  eventUpMinCm: 10,         // subida mínima (serie suavizada 24 h) para contar como crecida aguas arriba
+  eventDownMinCm: 3,        // subida mínima aguas abajo (la onda se atenúa)
+  eventMinMatches: 3,       // crecidas emparejadas mínimas para informar un tiempo de viaje
   propagationMaxLagH: 120,
-  propagationMinR: 0.6,     // sólo se estiman tiempos de llegada con correlación alta
+  propagationMinR: 0.6,     // correlación sola: sólo con r alta
+  corroborateMinR: 0.4,     // correlación que sólo confirma a las crecidas (mismo desfase)
+  correlationDays: 730,     // ventana para la correlación (costo de cálculo)
   rainResponseMinMm: 5,
   suspectJumpM: 1.5,
   levelMin: -5,
   levelMax: 25,
   rainMaxStep: 150,
   minCoverage: 0.7,         // un promedio de N días exige datos en ≥70 % de los días
-  climMinYears: 3,          // "normal" = mismo mes de ≥3 años anteriores
+  climMinYears: 3,          // percentil: mismo mes de ≥3 años anteriores
+  climClassMinYears: 5,     // adjetivo ("bajo", "normal"…) sólo con ≥5 años
   climMinDays: 60,
 };
 
@@ -242,11 +248,18 @@ export function rainSum(pts: P[], start: number, end = Infinity): { mm: number |
 /** pts: sólo registros VALID. lastValid: timestamp del último registro VALID (no de cualquier registro). */
 export function rainSummary(pts: P[], lastValid: number | null, now = Date.now()) {
   const out: any = { last_ts: lastValid ? iso(lastValid) : null, windows: {} };
+  // registros típicos por día: mediana de los últimos 30 días con datos
+  const perDay = new Map<string, number>();
+  for (const [t] of pts) if (t > now - 30 * D) { const d = localDate(t - 1000); perDay.set(d, (perDay.get(d) || 0) + 1); }
+  const counts = [...perDay.values()].sort((x, y) => x - y);
+  const typical = counts.length >= 5 ? counts[Math.floor(counts.length / 2)] : null;
+  out.typical_per_day = typical;
   for (const [k, h] of Object.entries(RAIN_WINDOWS)) {
     const start = now - h * H;
     const r = rainSum(pts, start, now);
-    out.windows[k] = r.mm == null ? { mm: null, n: 0, reason: "sin registros válidos en la ventana" }
-      : { ...r, partial: !!lastValid && lastValid < now - CFG.staleHours * H };
+    const expected = typical ? Math.max(1, Math.round((typical * h) / 24)) : null;
+    out.windows[k] = r.mm == null ? { mm: null, n: 0, expected, reason: "sin registros válidos en la ventana" }
+      : { ...r, expected, partial: (!!lastValid && lastValid < now - CFG.staleHours * H) || (expected != null && r.n < CFG.minCoverage * expected) };
   }
   const today = localDate(now);
   const mStart = Date.parse(`${today.slice(0, 8)}01T03:00:00Z`); // 00:00 hora argentina del día 1
@@ -297,7 +310,8 @@ export function lagCorrelation(up: P[], down: P[], maxLag: number, diffH = PROP_
   const start = Math.ceil(Math.max(up[0][0], down[0][0]) / H) * H;
   const end = Math.min(up[up.length - 1][0], down[down.length - 1][0]);
   if (end - start < 30 * D) return { ok: false, reason: "menos de 30 días de superposición" };
-  const a = hourly(up, start, end), b = hourly(down, start, end);
+  // suavizado 24 h: saca el ciclo diario del deshielo, que si no domina la correlación
+  const a = smooth24(hourly(up, start, end, 30)), b = smooth24(hourly(down, start, end, 30));
   const da = new Float64Array(a.length - diffH), db = new Float64Array(b.length - diffH);
   for (let i = 0; i < da.length; i++) { da[i] = a[i + diffH] - a[i]; db[i] = b[i + diffH] - b[i]; }
   const res: { lag: number; r: number; n: number }[] = [];
@@ -317,13 +331,13 @@ export function lagCorrelation(up: P[], down: P[], maxLag: number, diffH = PROP_
   if (best < 0) return { ok: false, reason: "sin superposición suficiente" };
   const rmax = res[best].r;
   const r3 = Math.round(rmax * 1000) / 1000;
-  if (best >= maxLag - 3) return { ok: false, reason: `sin desfase claro dentro de 0–${maxLag} h`, r: r3 };
-  if (rmax < CFG.propagationMinR) return { ok: false, reason: `correlación insuficiente (r = ${rmax.toFixed(2)}; se exige ≥ ${CFG.propagationMinR})`, r: r3 };
+  const curve = res.map((x) => ({ lag_h: x.lag, r: Number.isNaN(x.r) ? null : Math.round(x.r * 1000) / 1000 }));
+  if (best >= maxLag - 3) return { ok: false, reason: `sin desfase claro dentro de 0–${maxLag} h`, r: r3, curve };
+  if (rmax < CFG.propagationMinR) return { ok: false, reason: `correlación insuficiente (r = ${rmax.toFixed(2)}; se exige ≥ ${CFG.propagationMinR})`, r: r3, lag_h: best, curve };
   let lo = best, hi = best;
   while (lo - 1 >= 0 && !Number.isNaN(res[lo - 1].r) && res[lo - 1].r >= rmax - 0.03) lo--;
   while (hi + 1 < res.length && !Number.isNaN(res[hi + 1].r) && res[hi + 1].r >= rmax - 0.03) hi++;
-  return { ok: true, lag_h: best, lag_range_h: [lo, hi] as [number, number], r: r3, confidence: "alta", n_pairs: res[best].n,
-    curve: res.map((x) => ({ lag_h: x.lag, r: Number.isNaN(x.r) ? null : Math.round(x.r * 1000) / 1000 })) };
+  return { ok: true, lag_h: best, lag_range_h: [lo, hi] as [number, number], r: r3, confidence: "alta", n_pairs: res[best].n, curve };
 }
 
 export function riseOnset(pts: P[]): number | null {
@@ -337,16 +351,149 @@ export function riseOnset(pts: P[]): number | null {
   return tmin < tl ? tmin : null;
 }
 
+// ---------------------------------------------------------------- tiempos de viaje por crecidas
+export type RiseEvent = { onset: number; peak: number; v0: number; vp: number; rise: number };
+
+/** Media móvil centrada de 24 h (saca el ciclo diario del deshielo). NaN si hay < 8 h con dato en la ventana. */
+function smooth24(a: Float64Array): Float64Array {
+  const out = new Float64Array(a.length).fill(NaN);
+  let sum = 0, n = 0;
+  for (let i = 0; i < a.length + 12; i++) {
+    if (i < a.length && !Number.isNaN(a[i])) { sum += a[i]; n++; }
+    const drop = i - 25;
+    if (drop >= 0 && !Number.isNaN(a[drop])) { sum -= a[drop]; n--; }
+    const c = i - 12;
+    if (c >= 0 && c < a.length && n >= 8 && !Number.isNaN(a[c])) out[c] = sum / n;
+  }
+  return out;
+}
+
+/** Crecidas completas de una serie: pico = máximo en ±48 h, subida desde el mínimo de las 120 h previas,
+ *  y bajada posterior de al menos 30 % de la subida (descarta escalones y el deshielo que sólo sube). */
+export function riseEvents(pts: P[], minRiseM: number): RiseEvent[] {
+  if (pts.length < 10) return [];
+  const t0 = Math.ceil(pts[0][0] / H) * H;
+  const raw = hourly(pts, t0, pts[pts.length - 1][0], 30);
+  const sm = smooth24(raw);
+  const ev: RiseEvent[] = [];
+  const n = sm.length;
+  for (let i = 48; i < n - 48; i++) {
+    const v = sm[i];
+    if (Number.isNaN(v)) continue;
+    let isPeak = true, cnt = 0;
+    for (let k = i - 48; k <= i + 48 && isPeak; k++) {
+      if (Number.isNaN(sm[k])) continue;
+      cnt++;
+      if (sm[k] > v || (sm[k] === v && k < i)) isPeak = false;
+    }
+    if (!isPeak || cnt < 50) continue;
+    let jmin = -1;
+    for (let k = Math.max(0, i - 120); k < i; k++) if (!Number.isNaN(sm[k]) && (jmin < 0 || sm[k] < sm[jmin])) jmin = k;
+    if (jmin < 0) continue;
+    const rise = v - sm[jmin];
+    if (rise < minRiseM) continue;
+    let after = Infinity;
+    for (let k = i; k <= Math.min(n - 1, i + 72); k++) if (!Number.isNaN(sm[k]) && sm[k] < after) after = sm[k];
+    if (!(v - after >= 0.3 * rise)) continue;
+    // pico real: máximo del dato horario en ±12 h del pico suavizado
+    let ip = i;
+    for (let k = Math.max(0, i - 12); k <= Math.min(n - 1, i + 12); k++) if (!Number.isNaN(raw[k]) && (Number.isNaN(raw[ip]) || raw[k] > raw[ip])) ip = k;
+    ev.push({ onset: t0 + jmin * H, peak: t0 + ip * H, v0: sm[jmin], vp: Number.isNaN(raw[ip]) ? v : raw[ip], rise });
+    i += 48;
+  }
+  return ev;
+}
+
+const median = (a: number[]) => { const b = [...a].sort((x, y) => x - y); const m = b.length >> 1; return b.length % 2 ? b[m] : (b[m - 1] + b[m]) / 2; };
+const quant = (a: number[], q: number) => { const b = [...a].sort((x, y) => x - y); const pos = (b.length - 1) * q, lo = Math.floor(pos); return b[lo] + (b[Math.min(lo + 1, b.length - 1)] - b[lo]) * (pos - lo); };
+
+/** Empareja cada crecida aguas arriba con la primera crecida aguas abajo cuyo pico llega dentro de [−6 h, maxLag];
+ *  segunda pasada: elige el candidato más cercano a la mediana y descarta desvíos grandes. */
+export function travelTime(up: RiseEvent[], down: RiseEvent[], maxLagH: number) {
+  const pass = (target: number | null) => {
+    const used = new Set<number>();
+    const m: { up: RiseEvent; down: RiseEvent; lag: number; onsetLag: number }[] = [];
+    for (const u of up) {
+      let best = -1, bestScore = Infinity;
+      down.forEach((d, j) => {
+        if (used.has(j)) return;
+        const lag = (d.peak - u.peak) / H;
+        if (lag < -6 || lag > maxLagH) return;
+        const score = target == null ? lag : Math.abs(lag - target);
+        if (score < bestScore) { bestScore = score; best = j; }
+      });
+      if (best >= 0) { used.add(best); m.push({ up: u, down: down[best], lag: (down[best].peak - u.peak) / H, onsetLag: (down[best].onset - u.onset) / H }); }
+    }
+    return m;
+  };
+  let m = pass(null);
+  if (m.length >= CFG.eventMinMatches) m = pass(median(m.map((x) => x.lag)));
+  if (m.length >= CFG.eventMinMatches) {
+    const med = median(m.map((x) => x.lag));
+    const mad = median(m.map((x) => Math.abs(x.lag - med)));
+    const tol = Math.max(12, 3 * mad);
+    m = m.filter((x) => Math.abs(x.lag - med) <= tol);
+  }
+  const events = m.map((x) => ({ up_peak: iso(x.up.peak), down_peak: iso(x.down.peak), lag_h: Math.round(x.lag), up_rise_cm: Math.round(x.up.rise * 100), down_rise_cm: Math.round(x.down.rise * 100) }));
+  if (m.length < CFG.eventMinMatches)
+    return { ok: false, method: "crecidas", n_events: m.length, events, reason: up.length < CFG.eventMinMatches ? `pocas crecidas registradas aguas arriba (${up.length})` : `sólo ${m.length} crecida(s) emparejada(s); se necesitan ${CFG.eventMinMatches}` };
+  const lags = m.map((x) => Math.max(0, x.lag)), onsets = m.map((x) => x.onsetLag);
+  const lo = Math.max(0, Math.round(quant(lags, 0.25))), hi = Math.max(lo, Math.round(quant(lags, 0.75)));
+  return { ok: true, method: "crecidas", lag_h: Math.max(0, Math.round(median(lags))), lag_range_h: [lo, hi] as [number, number],
+    onset_lag_h: Math.round(median(onsets)), n_events: m.length, confidence: m.length >= 8 && hi - lo <= 12 ? "alta" : "media", events };
+}
+
+/** Mezcla los dos métodos: crecidas pasadas (demora entre picos) y correlación cruzada (serie completa).
+ *  - Coinciden (diferencia ≤ max(6 h, 25 %)): se promedian, confianza alta.
+ *  - Sólo uno alcanza: se usa ese, confianza media (la correlación sola exige r ≥ 0,6).
+ *  - No coinciden: se muestran los dos extremos como rango, confianza baja. */
+export function combineMethods(ev: any, co: any) {
+  const coLag: number | null = co?.lag_h ?? null;
+  const coUsable = co?.ok || (coLag != null && (co.r ?? 0) >= CFG.corroborateMinR);
+  const base = { n_events: ev.n_events ?? 0, events: ev.events || [], r: co?.r ?? null, corr_lag_h: coLag, curve: co?.curve || null, ev_lag_h: ev.ok ? ev.lag_h : null };
+  if (ev.ok && coUsable && coLag != null) {
+    const agree = Math.abs(ev.lag_h - coLag) <= Math.max(6, 0.25 * ev.lag_h);
+    if (agree) {
+      const lag = Math.round((ev.lag_h + coLag) / 2);
+      return { ...base, ok: true, method: "crecidas + correlación", agree: true, lag_h: lag,
+        lag_range_h: [Math.min(ev.lag_range_h[0], coLag), Math.max(ev.lag_range_h[1], coLag)] as [number, number],
+        confidence: ev.n_events >= 5 ? "alta" : "media" };
+    }
+    if (ev.n_events >= 5 && !co.ok) return { ...base, ok: true, method: "crecidas", agree: false, lag_h: ev.lag_h, lag_range_h: ev.lag_range_h, confidence: "media" };
+    return { ...base, ok: true, method: "crecidas + correlación", agree: false, lag_h: Math.round((ev.lag_h + coLag) / 2),
+      lag_range_h: [Math.min(ev.lag_range_h[0], coLag), Math.max(ev.lag_range_h[1], coLag)] as [number, number], confidence: "baja",
+      note: `los métodos no coinciden (crecidas ${ev.lag_h} h, correlación ${coLag} h)` };
+  }
+  if (ev.ok) return { ...base, ok: true, method: "crecidas", lag_h: ev.lag_h, lag_range_h: ev.lag_range_h, confidence: ev.confidence };
+  if (co?.ok) return { ...base, ok: true, method: "correlación", lag_h: co.lag_h, lag_range_h: co.lag_range_h, confidence: "media" };
+  return { ...base, ok: false, method: null, reason: `${ev.reason}; ${co?.reason || "sin correlación"}` };
+}
+
 export function propagation(stations: { key: string; name: string }[], data: Record<string, P[]>, now = Date.now()) {
   const since = now - CFG.propagationDays * D;
   const win: Record<string, P[]> = {};
   for (const s of stations) win[s.key] = (data[s.key] || []).filter(([t]) => t >= since);
-  const chain = stations.filter((s) => win[s.key].length && now - win[s.key][win[s.key].length - 1][0] < 72 * H);
-  const pairs: any[] = [];
-  for (let i = 0; i + 1 < chain.length; i++) {
-    const up = chain[i], down = chain[i + 1];
-    pairs.push({ from: up.key, from_name: up.name, to: down.key, to_name: down.name, ...lagCorrelation(win[up.key], win[down.key], CFG.propagationMaxLagH) });
-  }
+  const chain = stations.filter((s) => win[s.key].length >= 10);
+  const upEv: Record<string, RiseEvent[]> = {}, downEv: Record<string, RiseEvent[]> = {};
+  for (const s of chain) { upEv[s.key] = riseEvents(win[s.key], CFG.eventUpMinCm / 100); downEv[s.key] = riseEvents(win[s.key], CFG.eventDownMinCm / 100); }
+  const corrSince = now - CFG.correlationDays * D;
+  const pairOf = (a: number, b: number) => {
+    const up = chain[a], down = chain[b];
+    const maxLag = Math.min(300, CFG.propagationMaxLagH * (b - a));
+    const ev: any = travelTime(upEv[up.key], downEv[down.key], maxLag);
+    const co: any = lagCorrelation(win[up.key].filter(([t]) => t >= corrSince), win[down.key].filter(([t]) => t >= corrSince), maxLag);
+    return { from: up.key, from_name: up.name, to: down.key, to_name: down.name, ...combineMethods(ev, co) };
+  };
+  const pairs: any[] = [], direct: any[] = [];
+  for (let i = 0; i + 1 < chain.length; i++) pairs.push(pairOf(i, i + 1));
+  for (let i = 0; i < chain.length; i++) for (let j = i + 2; j < chain.length; j++) direct.push(pairOf(i, j));
+  const between = (i: number, j: number): [number, number] | null => {
+    const d = direct.find((p) => p.from === chain[i].key && p.to === chain[j].key && p.ok);
+    if (d) return d.lag_range_h;
+    let lo = 0, hi = 0;
+    for (let k = i; k < j; k++) { const p = pairs[k]; if (!p.ok) return null; lo += p.lag_range_h[0]; hi += p.lag_range_h[1]; }
+    return [lo, hi];
+  };
   const signals: any[] = [];
   chain.forEach((s, i) => {
     const pts = win[s.key];
@@ -359,36 +506,43 @@ export function propagation(stations: { key: string; name: string }[], data: Rec
     const [minAfter] = minMax(pts.filter(([t]) => t >= onset).map(([, v]) => v));
     const riseCm = Math.round((pts[pts.length - 1][1] - minAfter) * 1000) / 10;
     const hoursAgo = Math.round(((now - onset) / H) * 10) / 10;
+    // referencia temporal: el pico si ya pasó (último dato por debajo del máximo), si no el último dato ("no antes de")
+    const recent = pts.filter(([t]) => t >= onset);
+    let pk = recent[0];
+    for (const x of recent) if (x[1] >= pk[1]) pk = x;
+    const peaked = pk[0] < pts[pts.length - 1][0] && pts[pts.length - 1][1] < pk[1] - 0.02;
+    const ref = peaked ? pk[0] : pts[pts.length - 1][0];
     const downstream: any[] = [];
-    let loAcc = 0, hiAcc = 0, broken = false;
-    for (let j = i; j < chain.length - 1; j++) {
-      const p = pairs[j];
-      if (!p.ok) { broken = true; break; }
-      loAcc += p.lag_range_h[0]; hiAcc += p.lag_range_h[1];
-      const tgt = chain[j + 1];
-      const etaLo = onset + loAcc * H, etaHi = onset + hiAcc * H;
-      downstream.push({ to: tgt.key, to_name: tgt.name, lag_range_h: [loAcc, hiAcc], eta_from: iso(etaLo), eta_to: iso(etaHi),
+    for (let j = i + 1; j < chain.length; j++) {
+      const r = between(i, j);
+      if (!r) continue;
+      const tgt = chain[j];
+      const etaLo = ref + r[0] * H, etaHi = ref + r[1] * H;
+      downstream.push({ to: tgt.key, to_name: tgt.name, lag_range_h: r, eta_from: iso(etaLo), eta_to: iso(etaHi), peak_known: peaked,
         hours_from_now: [Math.round(((etaLo - now) / H) * 10) / 10, Math.round(((etaHi - now) / H) * 10) / 10],
         already_rising: trend(win[tgt.key]).label === "SUBIENDO" });
     }
-    const msgs = [`Subida en ${s.name} (+${Math.round(riseCm)} cm) que empezó hace unas ${Math.round(hoursAgo)} h.`];
+    const msgs = [`Subida en ${s.name} (+${Math.round(riseCm)} cm) que empezó hace unas ${Math.round(hoursAgo)} h${peaked ? `; el pico fue ${fDateShort(pk[0])}` : "; todavía sin pico"}.`];
     for (const d of downstream) {
       const [a, b] = d.hours_from_now;
-      if (d.already_rising) msgs.push(`En ${d.to_name} ya se observa subida.`);
-      else if (b < 0) msgs.push(`La ventana estimada para ${d.to_name} ya pasó (${Math.round(-b)}–${Math.round(-a)} h atrás) sin subida clara.`);
-      else msgs.push(`Estimación: podría empezar a notarse en ${d.to_name} en ~${Math.round(Math.max(a, 0))}–${Math.round(b)} h.`);
+      const what = peaked ? "el pico podría llegar a" : "el pico no llegaría antes de ~";
+      if (b < 0) msgs.push(`${d.to_name}: la ventana estimada ya pasó (${Math.round(-b)}–${Math.round(-a)} h atrás)${d.already_rising ? "; está subiendo" : ""}.`);
+      else if (peaked) msgs.push(`Estimación: ${what} ${d.to_name} en ~${Math.round(Math.max(a, 0))}–${Math.round(b)} h.`);
+      else msgs.push(`Estimación: en ${d.to_name} ${what}${Math.round(Math.max(a, 0))} h (${d.lag_range_h[0] === d.lag_range_h[1] ? d.lag_range_h[0] : `${d.lag_range_h[0]}–${d.lag_range_h[1]}`} h después del pico en ${s.name}).`);
     }
-    if (broken && !downstream.length) msgs.push("No hay correlación suficiente (r ≥ 0,6) con la estación siguiente para estimar tiempos.");
-    signals.push({ station: s.key, name: s.name, onset: iso(onset), hours_ago: hoursAgo, rise_cm: riseCm, downstream, messages: msgs });
+    if (!downstream.length && i < chain.length - 1) msgs.push("No hay suficientes crecidas históricas emparejadas para estimar tiempos aguas abajo.");
+    signals.push({ station: s.key, name: s.name, onset: iso(onset), hours_ago: hoursAgo, rise_cm: riseCm, peaked, peak_ts: iso(pk[0]), downstream, messages: msgs });
   });
   return {
     chain: chain.map((s) => ({ key: s.key, name: s.name })),
-    excluded: stations.filter((s) => !chain.includes(s)).map((s) => ({ key: s.key, name: s.name, reason: "sin datos en las últimas 72 h" })),
-    pairs, signals,
-    method: `ESTIMADO. Correlación cruzada entre variaciones de ${PROP_DIFF_H} h del nivel (series interpoladas a grilla horaria, huecos >12 h excluidos), últimos ${CFG.propagationDays} días, desfases 0–${CFG.propagationMaxLagH} h. Sólo se informan tramos con r ≥ ${CFG.propagationMinR}. El rango X–Y h son los desfases con correlación a ≤0,03 del máximo.`,
-    disclaimer: "Estimación estadística basada en el comportamiento pasado de las series. NO es una predicción hidrológica oficial.",
+    excluded: stations.filter((s) => !chain.includes(s)).map((s) => ({ key: s.key, name: s.name, reason: "sin datos" })),
+    pairs, direct, signals,
+    method: `ESTIMADO. Se detectan las crecidas de cada estación en toda la historia disponible (serie suavizada 24 h; subida ≥ ${CFG.eventUpMinCm} cm aguas arriba y ≥ ${CFG.eventDownMinCm} cm aguas abajo, con bajada posterior). Cada crecida se empareja con la siguiente crecida aguas abajo y se mide la demora entre picos. Se informa la mediana y el rango intercuartil (50 % central de los casos); hacen falta ≥ ${CFG.eventMinMatches} crecidas emparejadas. Además se calcula la correlación cruzada de las variaciones de 24 h (serie suavizada, últimos ${Math.round(CFG.correlationDays / 365)} años). Si los dos métodos coinciden se promedian (confianza alta); si sólo uno alcanza se usa ese (la correlación sola exige r ≥ ${CFG.propagationMinR}); si no coinciden se muestra el rango entre ambos (confianza baja).`,
+    disclaimer: "Estimación estadística basada en crecidas pasadas. NO es una predicción hidrológica oficial.",
   };
 }
+
+const fDateShort = (ms: number) => { const d = new Date(ms - 3 * H); return `${String(d.getUTCDate()).padStart(2, "0")}/${String(d.getUTCMonth() + 1).padStart(2, "0")} ${String(d.getUTCHours()).padStart(2, "0")}:00`; };
 
 /** Clase según percentil del mismo mes en años anteriores. null si no hay climatología suficiente. */
 export function pctClass(p: number | null): { label: string; code: string } | null {

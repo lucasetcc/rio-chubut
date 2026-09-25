@@ -14,7 +14,7 @@ export type SeriesInfo = {
 
 export type RainSummary = {
   last_ts: string | null; last_local?: string | null; stale: boolean;
-  windows: Record<string, { mm: number | null; n: number; partial?: boolean; reason?: string }>;
+  windows: Record<string, { mm: number | null; n: number; expected?: number | null; partial?: boolean; reason?: string }>;
   month_to_date: { mm: number | null; n: number } | null;
 };
 
@@ -60,7 +60,7 @@ export type Stats = {
 // ======================================================================================
 import * as an from "./data/analytics";
 import { CFG, D, H, iso, localDate, P } from "./data/analytics";
-import { DEFAULT_RULES, lastValidTs, loadAll, loadHist, loadSettings, S, seriesOf, Settings, sourceUrl, usable } from "./data/engine";
+import { DEFAULT_RULES, extInfo, lastValidTs, loadAll, loadHist, loadSettings, S, seriesOf, Settings, sourceUrl, usable } from "./data/engine";
 import { fDateTime, safeUrl } from "./fmt";
 import seed from "./data/stations.json";
 import damRef from "./data/dam_reference.json";
@@ -110,7 +110,7 @@ function seriesInfo(key: string) {
     const st = S.series.get(d.id);
     const lt = st?.obs.length ? iso(st.obs[st.obs.length - 1].t) : null;
     return { id: d.id, role: d.role, var_code: st?.meta?.var?.var ?? null, var_name: st?.meta?.var?.nombre ?? null, unit: st?.unit ?? null,
-      verify_status: st?.verify ?? (d.role === "level_hist" ? "se carga al abrir el histórico" : "pending"), verify_detail: st?.verify_detail ?? null,
+      verify_status: st?.verify ?? (d.role === "level_hist" ? "se carga al abrir el histórico" : "pending"), verify_detail: st?.verify_detail ?? (d.role === "level_ext" ? (extInfo(key)?.used ? `unida: ${extInfo(key)!.reason}` : extInfo(key)?.reason ?? null) : null),
       last_obs_ts: lt, last_obs_local: localStr(lt), source_url: sourceUrl(d.id),
       last_fetch_status: st?.verify === "error" ? "error" : st ? "ok" : null, last_error: st?.error ?? null, error_at: st?.error_at ?? null,
       fetched_at: st?.fetched_at ?? null, last_fetch_at: st?.fetched_at ?? st?.error_at ?? null };
@@ -122,6 +122,10 @@ function stationStats(key: string) {
   return cached(`stats:${key}`, () => {
     const st = an.stationStats(usable(key, "level", base));
     if (st.available && base) st.method += ` Historia desde ${localStr(base)} por un probable cambio de cero de escala anterior.`;
+    const xi = extInfo(key);
+    if (st.available && xi) st.method += xi.used && !base
+      ? ` Incluye la red histórica del INA (serie ${xi.series_id}) desde ${localStr(xi.from!)?.slice(0, 10)}: ${xi.reason} (${xi.overlap_n} registros comparados).`
+      : ` Red histórica del INA (serie ${xi.series_id}) no usada: ${xi.reason}.`;
     return st;
   });
 }
@@ -144,7 +148,7 @@ function stationSummary(key: string): Station {
     const clim = stats.available ? stats.same_month_climatology : null;
     out.stats_brief = stats.available ? { avg_7d: stats.windows["7d"].mean, avg_30d: stats.windows["30d"].mean, avg_365d: stats.windows["365d"].mean,
       p90_hist: stats.windows.historico.p90, history_days: stats.history_days, comparisons: stats.comparisons, same_month_mean: clim.median,
-      pct: stats.percentile_rank_hist, pct_class: an.pctClass(stats.percentile_rank_hist), hist: stats.windows.historico,
+      pct: stats.percentile_rank_hist, pct_class: clim.ok && clim.years.length >= an.CFG.climClassMinYears ? an.pctClass(stats.percentile_rank_hist) : null, hist: stats.windows.historico,
       clim: { ok: clim.ok, month_name: clim.month_name, years: clim.years, median: clim.median, p25: clim.p25, p75: clim.p75, reason: clim.reason },
       record_median: stats.windows.historico.median, record_since: stats.record_since,
       base_from: seriesOf(key, "level")?.baseFrom ? iso(seriesOf(key, "level")!.baseFrom!) : null } : null;
@@ -229,7 +233,9 @@ function evalAlerts() {
         for (const sig of prop().signals) for (const d of sig.downstream) {
           if ((!rule.station_key || d.to === rule.station_key) && !d.already_rising && d.hours_from_now[1] >= 0) {
             const [a, b] = d.hours_from_now;
-            push(d.to, `${d.to_name} podría recibir la señal de subida detectada en ${sig.name} en ~${Math.round(Math.max(a, 0))}–${Math.round(b)} h (estimación estadística).`, b, sig.onset);
+            push(d.to, d.peak_known
+              ? `El pico de ${sig.name} podría llegar a ${d.to_name} en ~${Math.round(Math.max(a, 0))}–${Math.round(b)} h (estimación estadística).`
+              : `${sig.name} sigue subiendo: el pico no llegaría a ${d.to_name} antes de ~${Math.round(Math.max(a, 0))} h (estimación estadística).`, b, sig.onset);
           }
         }
       } else if (rule.type === "rain") {
@@ -303,7 +309,10 @@ export const api = {
     }
     if (agg === "daily") return { unit: "m", data: [...an.dailyMeans(usable(k, "level", since)).entries()].map(([date, v]) => ({ date, ...v })) };
     const st = seriesOf(k, "level");
-    let rows = (st?.obs || []).filter((o) => o.t >= since && o.v !== null).map((o) => ({ ts: iso(o.t), value: o.v, quality: o.q, quality_note: o.note, source: "INA" }));
+    const xi = extInfo(k);
+    const t0 = st?.obs[0]?.t ?? Infinity;
+    const extRows = xi?.used ? usable(k, "level", since).filter(([t]) => t < t0).map(([t, v]) => ({ ts: iso(t), value: v, quality: "VALID", quality_note: undefined, source: "INA (red histórica)" })) : [];
+    let rows = [...extRows, ...(st?.obs || []).filter((o) => o.t >= since && o.v !== null).map((o) => ({ ts: iso(o.t), value: o.v, quality: o.q, quality_note: o.note, source: "INA" }))];
     if (rows.length > 6000) { const step = Math.ceil(rows.length / 5000); rows = rows.filter((_, i) => i % step === 0 || i === rows.length - 1); }
     return { unit: "m", data: rows };
   },
@@ -463,7 +472,7 @@ export const api = {
         const b = cfg.bbox;
         if (lat == null || lat < b.min_lat || lat > b.max_lat || lon < b.min_lon || lon > b.max_lon) continue;
         let rows: any = [];
-        try { rows = await (await fetch(`/api/ina/series-estacion/${e.id}`)).json(); } catch { continue; }
+        try { rows = await (await fetch(`/api/ina/series-estacion/${e.id}/${Math.floor(Date.now() / 86400e3)}`)).json(); } catch { continue; }
         for (const r of rows?.rows || rows || []) {
           const v = r.var || {};
           if (![2, 4, 27, 39].includes(v.id) || !r.date_range?.timeend || known.has(r.id)) continue;

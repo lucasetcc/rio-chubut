@@ -241,3 +241,4 @@ nav.sections a.on { background: var(--accent-soft); color: var(--text); }
 .state { margin-top: 12px; font-size: 13px; padding: 8px 10px; border-radius: 8px; background: var(--panel-2); }
 .state.err { color: var(--fall); }
 .state.small { font-size: 11.5px; margin-top: 6px; padding: 5px 8px; }
+.warn-text { color: var(--warn, #d99400); }

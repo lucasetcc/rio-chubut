@@ -17,7 +17,7 @@ const str = (v: unknown, max = 300) => typeof v === "string" && v.length <= max;
 const numOk = (v: unknown) => typeof v === "number" && Number.isFinite(v);
 const RULE_TYPES = ["rise", "above_avg", "trend", "propagation", "rain", "stale"];
 const DAM_VARS = ["cota", "volumen", "almacenamiento_pct", "caudal_entrante", "caudal_saliente", "generacion"];
-const ROLES = ["level", "rain", "level_hist", "discharge"];
+const ROLES = ["level", "rain", "level_hist", "level_ext", "discharge"];
 
 /** Valida y normaliza la configuración compartida. Devuelve { ok, value } o { ok:false, error }. */
 export function validateSettings(body: any): { ok: true; value: any } | { ok: false; error: string } {

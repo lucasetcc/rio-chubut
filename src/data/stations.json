@@ -46,6 +46,12 @@
           "id": 6790,
           "role": "rain",
           "var_id": 27
+        },
+        {
+          "id": 6374,
+          "role": "level_ext",
+          "var_id": 2,
+          "ina_station_id": 1983
         }
       ]
     },
@@ -91,9 +97,9 @@
           "var_id": 27
         },
         {
-          "id": 30006,
-          "role": "level_hist",
-          "var_id": 39,
+          "id": 6382,
+          "role": "level_ext",
+          "var_id": 2,
           "ina_station_id": 1986
         }
       ]
@@ -116,9 +122,9 @@
           "var_id": 2
         },
         {
-          "id": 30031,
-          "role": "level_hist",
-          "var_id": 39,
+          "id": 6445,
+          "role": "level_ext",
+          "var_id": 2,
           "ina_station_id": 2011
         }
       ]
@@ -165,9 +171,9 @@
           "var_id": 27
         },
         {
-          "id": 30032,
-          "role": "level_hist",
-          "var_id": 39,
+          "id": 6448,
+          "role": "level_ext",
+          "var_id": 2,
           "ina_station_id": 2012
         }
       ]
@@ -209,9 +215,9 @@
           "var_id": 2
         },
         {
-          "id": 30004,
-          "role": "level_hist",
-          "var_id": 39,
+          "id": 6377,
+          "role": "level_ext",
+          "var_id": 2,
           "ina_station_id": 1984
         }
       ]
@@ -290,7 +296,7 @@
       "ina_station_id": 2606,
       "lat": -42.65,
       "lon": -70.44,
-      "notes": "Tributario (recibe al Tecka y al Lepá). No es la estación del Río Chubut en Gualjaina.",
+      "notes": "Tributario (recibe al Tecka y al Lepá). El INA no informa el río de esta estación: 'Río Gualjaina' se deduce del nombre ('Gualjaina - Gualjaina') y de la ubicación. No es la estación del Río Chubut en Gualjaina.",
       "series": [
         {
           "id": 8242,

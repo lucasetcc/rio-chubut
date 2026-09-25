@@ -5,11 +5,11 @@ import { CFG, H, D, iso, P } from "./analytics";
 
 export type Quality = "VALID" | "SUSPECT" | "MISSING";
 export type Obs = { t: number; v: number | null; q: Quality; note?: string };
-export type SeriesDef = { id: number; role: "level" | "rain" | "level_hist" | "discharge"; var_id: number; ina_station_id?: number };
+export type SeriesDef = { id: number; role: "level" | "rain" | "level_hist" | "level_ext" | "discharge"; var_id: number; ina_station_id?: number };
 export type StationDef = { key: string; name: string; river: string; kind: string; main: boolean; chain_order: number | null;
   ina_station_id: number; lat: number; lon: number; notes: string; near_hydro?: string; series: SeriesDef[] };
 
-const EXPECTED_UNIT: Record<string, string> = { level: "m", level_hist: "m", rain: "mm", discharge: "m^3/s" };
+const EXPECTED_UNIT: Record<string, string> = { level: "m", level_hist: "m", level_ext: "m", rain: "mm", discharge: "m^3/s" };
 export const sourceUrl = (id: number) => `https://alerta.ina.gob.ar/a5/secciones?seriesId=${id}&tipo=puntual`;
 
 // ------------------------------------------------------------------ settings compartidos
@@ -82,7 +82,7 @@ function buildCatalog() {
 
 function flag(role: string, v: number | null): [Quality, string?] {
   if (v === null || Number.isNaN(v)) return ["MISSING", "valor nulo en la fuente"];
-  if (role === "level" || role === "level_hist") {
+  if (role === "level" || role === "level_hist" || role === "level_ext") {
     if (v < CFG.levelMin || v > CFG.levelMax) return ["SUSPECT", "valor fuera de rango físico"];
   }
   if (role === "rain" && (v < 0 || v > CFG.rainMaxStep)) return ["SUSPECT", "valor de lluvia imposible"];
@@ -108,7 +108,7 @@ async function loadSeries(st: SeriesState) {
     if (problems.length) return;
     const c = m.estacion?.geom?.coordinates;
     const sd = S.stations.find((s) => s.key === st.station);
-    if (c && sd && def.role !== "level_hist") { sd.lat = c[1]; sd.lon = c[0]; }
+    if (c && sd && def.role === "level") { sd.lat = c[1]; sd.lon = c[0]; }
   } catch (e) {
     st.verify = st.obs.length ? st.verify : "error"; st.error = String(e); st.error_at = iso(Date.now()); return;
   }
@@ -123,8 +123,17 @@ async function loadSeries(st: SeriesState) {
   const lastQ = Math.min(qIdx(tsEnd), nowQ);
   // Los trimestres cerrados no cambian: se descargan una vez y en las recargas sólo se pide el trimestre actual.
   const closed: string[] = [];
-  for (let q = firstQ; q <= Math.min(lastQ, nowQ - 1); q++) closed.push(`/api/ina/obs/${def.id}/${Math.floor(q / 4)}-Q${(q % 4) + 1}`);
-  const needRecent = lastQ >= nowQ || Date.now() - tsEnd < 120 * D;
+  let needRecent = lastQ >= nowQ || Date.now() - tsEnd < 120 * D;
+  if (def.role === "level_ext") {
+    // red histórica: años cerrados, sólo hasta el año en que empieza la serie actual (incluido, para verificar que coincidan)
+    const main = S.stations.find((s) => s.key === st.station)?.series.find((x) => x.role === "level");
+    const mainStart = main ? Date.parse(S.series.get(main.id)?.meta?.date_range?.timestart || "") : NaN;
+    const y1 = Math.min(new Date(tsEnd).getUTCFullYear(), new Date().getUTCFullYear() - 1, Number.isNaN(mainStart) ? 9999 : new Date(mainStart).getUTCFullYear());
+    for (let y = Math.max(2000, new Date(tsStart).getUTCFullYear()); y <= y1; y++) closed.push(`/api/ina/obs/${def.id}/${y}`);
+    needRecent = false;
+  } else {
+    for (let q = firstQ; q <= Math.min(lastQ, nowQ - 1); q++) closed.push(`/api/ina/obs/${def.id}/${Math.floor(q / 4)}-Q${(q % 4) + 1}`);
+  }
   const closedKey = closed.join("|");
   const rows: [string, any][] = [];
   let bad = 0;
@@ -178,7 +187,7 @@ async function loadSeries(st: SeriesState) {
   // Saltos: sólo se marca SUSPECT un pico aislado (sube y vuelve, o baja y vuelve, en pasos consecutivos
   // de ≤48 h). Un escalón que se mantiene (crecida real o cambio de cero de escala) NO se descarta:
   // queda registrado como aviso de calidad.
-  if (def.role === "level" || def.role === "level_hist") {
+  if (def.role === "level" || def.role === "level_hist" || def.role === "level_ext") {
     const th = CFG.suspectJumpM;
     const ok = obs.filter((o) => o.q === "VALID");
     for (let i = 1; i < ok.length; i++) {
@@ -219,6 +228,7 @@ export async function loadSettings() {
 }
 
 let inflight: Promise<void> | null = null;
+let extLoading = false;
 export function loadAll(force = false): Promise<void> {
   if (inflight) return inflight;
   if (!force && S.loadedAt && Date.now() - S.loadedAt < 5 * 60e3) return Promise.resolve();
@@ -232,13 +242,24 @@ async function doLoad() {
     await loadSettings();
     buildCatalog();
     const defs: SeriesState[] = [];
+    const ext: SeriesState[] = [];
     for (const s of S.stations) for (const d of s.series) {
       if (d.role === "level_hist") continue; // se carga a pedido
       const old = S.series.get(d.id);
-      defs.push(old ? { ...old, def: d, station: s.key } : { def: d, station: s.key, obs: [], verify: "pending", issues: [] });
+      const x = old ? { ...old, def: d, station: s.key } : { def: d, station: s.key, obs: [], verify: "pending" as const, issues: [] };
+      (d.role === "level_ext" ? ext : defs).push(x);
     }
     S.progress = { done: 0, total: defs.length };
-    await pool(defs, 4, async (st) => { try { await loadSeries(st); } catch (e) { st.verify = "error"; st.error = String(e); } S.series.set(st.def.id, st); S.progress.done++; });
+    const run = async (st: SeriesState) => { try { await loadSeries(st); } catch (e) { st.verify = "error"; st.error = String(e); } S.series.set(st.def.id, st); S.progress.done++; };
+    await pool(defs, 4, run);
+    // La red histórica (2019→) se baja en segundo plano: no demora la primera vista. Al terminar avisa para recalcular.
+    const pending = ext.filter((x) => !x.obs.length || x.verify !== "ok");
+    for (const x of ext) if (!pending.includes(x)) S.series.set(x.def.id, x);
+    if (pending.length && !extLoading) {
+      extLoading = true;
+      pool(pending, 3, async (st) => { try { await loadSeries(st); } catch (e) { st.verify = "error"; st.error = String(e); } S.series.set(st.def.id, st); })
+        .finally(() => { extLoading = false; S.version++; if (typeof window !== "undefined") window.dispatchEvent(new Event("rio-data")); });
+    }
     S.loadedAt = Date.now();
     const lvl = [...S.series.values()].filter((x) => x.def.role === "level");
     S.lastError = lvl.length && lvl.every((x) => x.verify === "error") ? "No se pudo contactar al INA (se muestran los datos ya cargados)." : null;
@@ -267,10 +288,58 @@ export function seriesOf(key: string, role: string): SeriesState | undefined {
   const d = sd?.series.find((x) => x.role === role);
   return d ? S.series.get(d.id) : undefined;
 }
-export function usable(key: string, role = "level", since = 0): P[] {
-  const st = seriesOf(key, role);
+function validPts(st: SeriesState | undefined, since = 0): P[] {
   if (!st || st.verify === "mismatch") return [];
   return st.obs.filter((o) => o.q === "VALID" && o.v !== null && o.t >= since).map((o) => [o.t, o.v as number]);
+}
+
+export type ExtInfo = { used: boolean; from: string | null; overlap_n: number; offset_m: number | null; mad_m: number | null; reason: string; series_id: number };
+const extMemo = new Map<string, { v: number; pts: P[]; info: ExtInfo | null }>();
+/** Nivel con la historia de la red anterior (BDHI) antepuesta. Sólo se une si en el período en que las dos series
+ *  se superponen coinciden (mediana de la diferencia ≤ 2 cm y dispersión ≤ 2 cm); si hay un corrimiento
+ *  constante de cero de escala se corrige con esa mediana. Si no coinciden, no se une. */
+function levelWithExt(key: string): { pts: P[]; info: ExtInfo | null } {
+  const m = extMemo.get(key);
+  if (m && m.v === S.version) return m;
+  const main = validPts(seriesOf(key, "level"));
+  const extSt = seriesOf(key, "level_ext");
+  let out = { pts: main, info: null as ExtInfo | null };
+  if (extSt) {
+    const ext = validPts(extSt);
+    const info: ExtInfo = { used: false, from: null, overlap_n: 0, offset_m: null, mad_m: null, reason: "", series_id: extSt.def.id };
+    if (!ext.length || !main.length) info.reason = ext.length ? "sin serie actual" : "sin datos en la red histórica";
+    else {
+      const byT = new Map(ext.map(([t, v]) => [t, v]));
+      const diffs: number[] = [];
+      for (const [t, v] of main) { const e = byT.get(t); if (e !== undefined) diffs.push(v - e); }
+      info.overlap_n = diffs.length;
+      if (diffs.length < 48) info.reason = "no hay período en común para verificar que midan lo mismo";
+      else {
+        const med = (a: number[]) => { const b = [...a].sort((x, y) => x - y); return b[b.length >> 1]; };
+        const off = med(diffs), mad = med(diffs.map((d) => Math.abs(d - off)));
+        info.offset_m = Math.round(off * 1000) / 1000; info.mad_m = Math.round(mad * 1000) / 1000;
+        if (mad > 0.02) info.reason = `las dos series no coinciden en el período común (dispersión ${Math.round(mad * 100)} cm)`;
+        else {
+          const t0 = main[0][0];
+          const pre = ext.filter(([t]) => t < t0).map(([t, v]) => [t, Math.round((v + (Math.abs(off) > 0.02 ? off : 0)) * 1000) / 1000] as P);
+          info.used = pre.length > 0;
+          info.from = pre.length ? iso(pre[0][0]) : null;
+          info.reason = Math.abs(off) > 0.02 ? `unida con corrección de cero de escala de ${off > 0 ? "+" : ""}${Math.round(off * 100)} cm` : "coinciden en el período común (mismo sensor)";
+          out = { pts: [...pre, ...main], info };
+        }
+      }
+    }
+    out.info = info;
+  }
+  const r = { v: S.version, ...out };
+  extMemo.set(key, r);
+  return r;
+}
+export const extInfo = (key: string) => levelWithExt(key).info;
+
+export function usable(key: string, role = "level", since = 0): P[] {
+  if (role === "level") { const p = levelWithExt(key).pts; return since ? p.filter(([t]) => t >= since) : p; }
+  return validPts(seriesOf(key, role), since);
 }
 export function lastTs(key: string, role: string): number | null {
   const st = seriesOf(key, role);

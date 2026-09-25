@@ -64,7 +64,7 @@ export function RainPanel({ rain, stations }: { rain: any; stations: Station[] }
             {list.map((s) => (
               <tr key={s.key} style={{ cursor: "pointer" }} onClick={() => setSel(s.key)}>
                 <td><b>{s.name}</b>{s.key === sel && <span className="small muted"> ← en gráfico</span>}</td>
-                {W.map((w) => <td key={w} className="n">{s.windows[w].mm == null ? <span className="nodata">sin datos</span> : `${num(s.windows[w].mm, 1)} mm`}</td>)}
+                {W.map((w) => { const x = s.windows[w]; return <td key={w} className="n" title={x.mm == null ? undefined : `${x.n} registros${x.expected ? ` de ~${x.expected} esperados` : ""}`}>{x.mm == null ? <span className="nodata">sin datos</span> : <>{num(x.mm, 1)} mm{x.partial && <div className="small warn-text">parcial ({x.n}{x.expected ? `/${x.expected}` : ""})</div>}</>}</td>; })}
                 <td className="n">{s.month_to_date?.mm == null ? <span className="nodata">sin datos</span> : `${num(s.month_to_date.mm, 1)} mm`}</td>
                 <td className="small">{s.last_ts ? <>{fDateTime(s.last_ts)} <span className={s.stale ? "stale-note" : "muted"}>({ago(s.last_ts)})</span></> : <span className="nodata">sin datos</span>}
                   {s.source_url && <> · <a href={s.source_url} target="_blank" rel="noreferrer">INA ↗</a></>}</td>
@@ -73,7 +73,7 @@ export function RainPanel({ rain, stations }: { rain: any; stations: Station[] }
           </tbody>
         </table>
         <div className="src" style={{ marginTop: 8 }}>
-          CALCULADO: suma de los registros de precipitación del INA cuyo cierre cae dentro de la ventana. El INA no publica el intervalo que cubre cada registro
+          CALCULADO: suma de los registros de precipitación del INA cuyo cierre cae dentro de la ventana. "Parcial" = llegaron menos del 70 % de los registros habituales de esa estación (registros recibidos/esperados). El INA no publica el intervalo que cubre cada registro
           (en algunas estaciones hay registros cada 4 h con un hueco nocturno), así que "24 h" puede incluir lluvia caída un poco antes. "Sin datos" = no hubo registros válidos: nunca se muestra como 0 mm.
           Tecka y Cerro Cóndor no tienen pluviómetro en el INA.</div>
       </div>

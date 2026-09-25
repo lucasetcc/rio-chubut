@@ -45,7 +45,7 @@ export function PctBar({ s }: { s: Station }) {
   const lv = s.level;
   if (!b || !lv) return null;
   const clim = b.clim;
-  if (!clim?.ok || b.pct == null || !b.pct_class) {
+  if (!clim?.ok || b.pct == null) {
     const d = b.record_median != null ? lv.value - b.record_median : null;
     return (
       <div className="pct small">
@@ -54,16 +54,17 @@ export function PctBar({ s }: { s: Station }) {
       </div>
     );
   }
-  const c = PCT_VAR[b.pct_class.code];
+  const c = b.pct_class ? PCT_VAR[b.pct_class.code] : "var(--muted)";
+  const span = `${clim.month_name} ${clim.years[0]}–${clim.years[clim.years.length - 1]}`;
   const d = clim.median != null ? lv.value - clim.median : null;
   return (
     <div className="pct" title={`Mediana de ${clim.month_name} (${clim.years.join(", ")}): ${num(clim.median)} m · rango normal (P25–P75): ${num(clim.p25)}–${num(clim.p75)} m`}>
-      <div className="pct-top"><span>vs {clim.month_name} de años anteriores: <b>{dev(d)}</b></span><b style={{ color: c }}>{b.pct_class.label.toUpperCase()}</b></div>
+      <div className="pct-top"><span>vs {b.pct_class ? `${clim.month_name} de años anteriores` : span}: <b>{dev(d)}</b></span>{b.pct_class && <b style={{ color: c }}>{b.pct_class.label.toUpperCase()}</b>}</div>
       <div className="pct-track">
         <i className="band" style={{ left: "25%", width: "50%" }} />
         <i className="mark" style={{ left: `${Math.min(100, Math.max(0, b.pct))}%`, background: c }} />
       </div>
-      <div className="pct-sub">Percentil {Math.round(b.pct)} · {clim.years[0]}–{clim.years[clim.years.length - 1]} ({clim.years.length} años) <Tag k="calc" /></div>
+      <div className="pct-sub">Percentil {Math.round(b.pct)} · {clim.years[0]}–{clim.years[clim.years.length - 1]} ({clim.years.length} años{b.pct_class ? "" : "; sin adjetivo hasta tener ≥5 años"}) <Tag k="calc" /></div>
     </div>
   );
 }
@@ -86,6 +87,7 @@ export function StationCard({ s }: { s: Station }) {
         <h3><span className="swatch" style={{ background: color }} />{s.name}</h3>
         <StatusBadge s={s.status} />
       </div>
+      {!s.main && s.river && <div className="small muted" style={{ marginTop: -4, marginBottom: 6 }}>{s.river}</div>}
       {lv && s.source_state !== "mismatch" ? (
         <>
           <div className="big">{num(lv.value)}<small>m</small>
@@ -132,7 +134,7 @@ export function StationTable({ stations }: { stations: Station[] }) {
               <td className="small">{s.kind === "rain" ? "Meteorológica" : s.kind === "dam_outflow" ? "Río bajo el dique" : s.chain_order ? "Río Chubut" : "Afluente"}</td>
               <td className="n"><b>{s.level ? num(s.level.value) : "—"}</b></td>
               <td className="n">{s.level && s.stats_brief?.clim?.ok && s.stats_brief.clim.median != null ? dev(s.level.value - s.stats_brief.clim.median) : "—"}</td>
-              <td className="n">{s.stats_brief?.pct != null ? `P${Math.round(s.stats_brief.pct)} · ${s.stats_brief.pct_class?.label}` : <span className="muted">sin clase</span>}</td>
+              <td className="n">{s.stats_brief?.pct != null ? `P${Math.round(s.stats_brief.pct)}${s.stats_brief.pct_class ? ` · ${s.stats_brief.pct_class.label}` : ""}` : <span className="muted">sin clase</span>}</td>
               <td className="n nodata">{s.has_level ? "s/d" : "—"}</td>
               <td className="n">{s.level ? (s.level.changes["1h"]?.delta_m == null ? "n/d" : cm(s.level.changes["1h"].delta_m)) : "—"}</td>
               <td className="n">{s.level ? cm(s.level.changes["6h"]?.delta_m) : "—"}</td>
