@@ -4,7 +4,7 @@ import { STATUS_VAR } from "./StationCards";
 
 const join = (xs: string[]) => (xs.length <= 1 ? xs.join("") : `${xs.slice(0, -1).join(", ")} y ${xs[xs.length - 1]}`);
 
-export function Headline({ main, prop }: { main: Station[]; prop: any }) {
+export function Headline({ main, prop, fcTop }: { main: Station[]; prop: any; fcTop?: { name: string; mm: number } | null }) {
   const withData = main.filter((s) => s.level);
   const flood = withData.filter((s) => s.status?.code === "flood");
   const rising = withData.filter((s) => s.status?.code === "rising");
@@ -19,6 +19,7 @@ export function Headline({ main, prop }: { main: Station[]; prop: any }) {
   const sig = prop?.signals?.[0];
   const next = sig?.downstream?.find((d: any) => !d.already_rising && d.hours_from_now[1] >= 0);
   if (next) parts.push(<span key="p">La señal podría llegar a <b>{next.to_name}</b> en ~{Math.round(Math.max(next.hours_from_now[0], 0))}–{Math.round(next.hours_from_now[1])} h (estimación).</span>);
+  if (fcTop && fcTop.mm >= 5) parts.push(<span key="fc"> Pronóstico: hasta <b>{num(fcTop.mm, 0)} mm en {fcTop.name}</b> en 3 días.</span>);
   return <div className="headline">{parts}</div>;
 }
 
@@ -69,7 +70,7 @@ export function RiverProfile({ main, prop, dam }: { main: Station[]; prop: any; 
           return (
             <g key={i}>
               <path d={`M${mid - 5},${y0 - 5} L${mid + 3},${y0} L${mid - 5},${y0 + 5}`} stroke={cssVar("var(--bg)")} strokeWidth={2} fill="none" />
-              {lag && <text x={mid} y={y0 - 12} textAnchor="middle" className="sub">~{lag.lag_range_h[0]}–{lag.lag_range_h[1]} h</text>}
+              {b && <text x={mid} y={y0 - 12} textAnchor="middle" className="sub">{lag ? `~${lag.lag_range_h[0]}–${lag.lag_range_h[1]} h` : "sin estimar"}</text>}
             </g>
           );
         })}

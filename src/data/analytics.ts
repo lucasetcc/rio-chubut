@@ -265,6 +265,9 @@ export function lagCorrelation(up: P[], down: P[], maxLag: number, diffH = 6) {
   res.forEach((x, i) => { if (!Number.isNaN(x.r) && (best < 0 || x.r > res[best].r)) best = i; });
   if (best < 0) return { ok: false, reason: "sin superposición suficiente" };
   const rmax = res[best].r;
+  // si el mejor desfase cae en el borde de la ventana de búsqueda, es un artefacto: no se informa
+  if (best >= maxLag - 3) return { ok: false, reason: `sin desfase claro dentro de 0–${maxLag} h`, r: Math.round(rmax * 1000) / 1000 };
+  if (rmax < 0.3) return { ok: false, reason: `correlación muy baja (r = ${rmax.toFixed(2)})`, r: Math.round(rmax * 1000) / 1000 };
   let lo = best, hi = best;
   while (lo - 1 >= 0 && !Number.isNaN(res[lo - 1].r) && res[lo - 1].r >= rmax - 0.03) lo--;
   while (hi + 1 < res.length && !Number.isNaN(res[hi + 1].r) && res[hi + 1].r >= rmax - 0.03) hi++;

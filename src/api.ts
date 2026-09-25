@@ -434,6 +434,13 @@ export const api = {
     return extra;
   },
   async ignoreDiscovered(id: number) { return saveSettings({ ignored_series: [...(S.settings.ignored_series || []), id] }); },
+  async forecast() {
+    const bucket = Math.floor(Date.now() / 1800e3);
+    const r = await fetch(`/api/forecast/${bucket}`);
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(body.error || `HTTP ${r.status}`);
+    return body;
+  },
   async collect() { await loadAll(true); return { status: "datos actualizados" }; },
   async exportData(k: string, variable: string, from: string, to: string, fmt: string) {
     await loadAll();

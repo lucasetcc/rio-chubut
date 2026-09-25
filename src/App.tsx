@@ -4,6 +4,7 @@ import { AlertsPanel, ConfigPanel, ExportPanel, SystemPanel } from "./components
 import { LevelChart } from "./components/Charts";
 import { DamPanel, DamSummary } from "./components/DamPanel";
 import { MapPanel } from "./components/MapPanel";
+import { ForecastPanel, forecastTop } from "./components/Forecast";
 import { Headline, Kpis, RiverProfile } from "./components/Overview";
 import { FloodPanel, PropagationPanel } from "./components/Propagation";
 import { RainPanel } from "./components/RainPanel";
@@ -13,7 +14,7 @@ import { S } from "./data/engine";
 import { ago, fDateTime } from "./fmt";
 
 const NAV = [
-  ["estado", "Estado"], ["graficos", "Evolución"], ["comparacion", "Promedios"], ["lluvia", "Lluvia"],
+  ["estado", "Estado"], ["graficos", "Evolución"], ["comparacion", "Promedios"], ["lluvia", "Lluvia"], ["pronostico", "Pronóstico"],
   ["propagacion", "Propagación"], ["mapa", "Mapa"], ["dique", "Dique"], ["alertas", "Alertas"], ["datos", "Datos"],
 ];
 
@@ -46,6 +47,8 @@ export default function App() {
   const [err, setErr] = useState<string | null>(null);
   const [statsKey, setStatsKey] = useState("cerro_condor");
   const [collectMsg, setCollectMsg] = useState<string | null>(null);
+  const [fc, setFc] = useState<any>(null);
+  const [fcErr, setFcErr] = useState<string | null>(null);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [theme, toggleTheme] = useTheme();
   const [, force] = useState(0);
@@ -59,6 +62,7 @@ export default function App() {
       api.dam().then(setDam).catch(() => {});
       api.alerts().then(setAlerts).catch(() => {});
       api.propagation().then(setProp).catch(() => {});
+      api.forecast().then((f) => { setFc(f); setFcErr(null); }).catch((e) => setFcErr(String(e.message || e)));
     } catch (e) {
       setErr(`No se pudieron cargar los datos: ${e}`);
     }
@@ -120,7 +124,7 @@ export default function App() {
           <div className="hero card">
             <div>
               <h1>Estado del Río Chubut</h1>
-              <Headline main={main} prop={prop} />
+              <Headline main={main} prop={prop} fcTop={forecastTop(fc)} />
               <div className="meta">
                 {status?.overall?.label} · Último dato: <b>{status?.last_data_local || "—"}</b>{status?.last_data_ts && ` (${ago(status.last_data_ts)})`}
                 {" · "}Actualizado: {status?.collector?.last_cycle?.at ? fDateTime(status.collector.last_cycle.at).slice(-5) : "—"}
@@ -168,6 +172,11 @@ export default function App() {
         <section id="lluvia">
           <h2>Precipitaciones</h2>
           <RainPanel key={theme} rain={rain} stations={stations} />
+        </section>
+
+        <section id="pronostico">
+          <h2>Pronóstico de lluvia <span className="hint">próximos días · modelos Open-Meteo</span></h2>
+          <ForecastPanel fc={fc} err={fcErr} />
         </section>
 
         <section id="propagacion">
