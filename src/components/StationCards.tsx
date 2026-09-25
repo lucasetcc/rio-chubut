@@ -31,6 +31,25 @@ export function Sparkline({ pts, color }: { pts?: [number, number][]; color: str
   );
 }
 
+export const PCT_VAR: Record<string, string> = { vlow: "var(--fall)", low: "#d9a441", normal: "var(--ok)", high: "var(--rise)", vhigh: "var(--flood)" };
+
+/** Dónde está hoy respecto de su propia historia: barra 0–100 con banda normal (P25–P75). */
+export function PctBar({ s }: { s: Station }) {
+  const b = s.stats_brief;
+  if (!b || b.pct == null || !b.pct_class) return <div className="pct nodata small">Historia insuficiente para comparar</div>;
+  const c = PCT_VAR[b.pct_class.code];
+  return (
+    <div className="pct" title={`Mediana histórica ${num(b.hist?.median)} m · normal (P25–P75): ${num(b.hist?.p25)}–${num(b.hist?.p75)} m · ${b.history_days} días de historia${b.base_from ? " (desde un probable cambio de escala)" : ""}`}>
+      <div className="pct-top"><span>Percentil <b>{Math.round(b.pct)}</b></span><b style={{ color: c }}>{b.pct_class.label.toUpperCase()}</b></div>
+      <div className="pct-track">
+        <i className="band" style={{ left: "25%", width: "50%" }} />
+        <i className="mark" style={{ left: `${Math.min(100, Math.max(0, b.pct))}%`, background: c }} />
+      </div>
+      <div className="pct-sub">normal: {num(b.hist?.p25)}–{num(b.hist?.p75)} m · {b.history_days} d de historia</div>
+    </div>
+  );
+}
+
 export function StationCard({ s }: { s: Station }) {
   const lv = s.level;
   const ch = lv?.changes || {};
@@ -48,6 +67,7 @@ export function StationCard({ s }: { s: Station }) {
             {tr?.cm_per_day != null && <span className={`rate ${tr.cm_per_day > 0 ? "up" : tr.cm_per_day < 0 ? "down" : "muted"}`}>{signed(tr.cm_per_day, " cm/d")}</span>}
           </div>
           <div className="caption">Nivel (escala local) · caudal: sin datos públicos</div>
+          <PctBar s={s} />
           <Sparkline pts={s.spark} color={color} />
           <div className="deltas">
             <div><span>6 h</span><Delta m={ch["6h"]?.delta_m} /></div>

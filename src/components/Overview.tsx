@@ -1,6 +1,6 @@
 import { Station } from "../api";
 import { ago, cm, cssVar, fDateTime, num, stationColor } from "../fmt";
-import { STATUS_VAR } from "./StationCards";
+import { PCT_VAR, STATUS_VAR } from "./StationCards";
 
 const join = (xs: string[]) => (xs.length <= 1 ? xs.join("") : `${xs.slice(0, -1).join(", ")} y ${xs[xs.length - 1]}`);
 
@@ -58,7 +58,7 @@ export function RiverProfile({ main, prop, dam }: { main: Station[]; prop: any; 
   const line = cssVar("var(--line-2)"), accent = cssVar("var(--accent)");
   return (
     <div className="card profile" style={{ overflowX: "auto" }}>
-      <svg viewBox={`0 0 ${W} 150`} style={{ minWidth: 720 }} role="img" aria-label="Perfil de la cuenca">
+      <svg viewBox={`0 0 ${W} 166`} style={{ minWidth: 720 }} role="img" aria-label="Perfil de la cuenca">
         <defs>
           <linearGradient id="rv" x1="0" x2="1"><stop offset="0" stopColor={accent} stopOpacity=".35" /><stop offset="1" stopColor={accent} stopOpacity=".8" /></linearGradient>
         </defs>
@@ -86,6 +86,11 @@ export function RiverProfile({ main, prop, dam }: { main: Station[]; prop: any; 
               <text x={xs[i]} y={y0 + 48} textAnchor="middle" className="sub" style={{ fill: d24 == null ? undefined : d24 > 0.005 ? cssVar("var(--pos)") : d24 < -0.005 ? cssVar("var(--neg)") : undefined }}>
                 {d24 == null ? "—" : `${cm(d24)} 24 h`}
               </text>
+              {s.stats_brief?.pct != null && s.stats_brief.pct_class && (
+                <text x={xs[i]} y={y0 + 64} textAnchor="middle" className="sub" style={{ fill: cssVar(PCT_VAR[s.stats_brief.pct_class.code]), fontWeight: 700 }}>
+                  P{Math.round(s.stats_brief.pct)} · {s.stats_brief.pct_class.label}
+                </text>
+              )}
             </g>
           );
         })}

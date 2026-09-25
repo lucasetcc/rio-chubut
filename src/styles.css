@@ -208,3 +208,12 @@ footer.foot .wrap { display: flex; gap: 20px; flex-wrap: wrap; justify-content: 
   .map { height: 380px; }
   .st-card .big { font-size: 30px; }
 }
+
+/* percentil respecto de la propia historia */
+.pct { margin-top: 10px; }
+.pct-top { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-2); }
+.pct-top b { font-weight: 750; letter-spacing: .04em; }
+.pct-track { position: relative; height: 6px; border-radius: 6px; background: var(--panel-3); margin: 6px 0 4px; }
+.pct-track .band { position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--ok) 28%, transparent); border-radius: 2px; }
+.pct-track .mark { position: absolute; top: -4px; width: 4px; height: 14px; border-radius: 2px; transform: translateX(-50%); box-shadow: 0 0 0 2px var(--panel); }
+.pct-sub { font-size: 11px; color: var(--muted); }

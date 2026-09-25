@@ -52,7 +52,7 @@ const bucketH = () => Math.floor(Date.now() / 3600e3);
 // ------------------------------------------------------------------ estado global
 type SeriesState = {
   def: SeriesDef; station: string; obs: Obs[]; meta?: any; verify: "pending" | "ok" | "mismatch" | "error";
-  verify_detail?: string; unit?: string; error?: string; fetched_at?: string; issues: { ts: string; issue: string; detail: string }[];
+  verify_detail?: string; unit?: string; error?: string; fetched_at?: string; baseFrom?: number; issues: { ts: string; issue: string; detail: string }[];
 };
 
 export const S = {
@@ -140,6 +140,7 @@ async function loadSeries(st: SeriesState) {
     return;
   }
   st.issues = [];
+  st.baseFrom = undefined;
   if (bad) st.issues.push({ ts: iso(Date.now()), issue: "format", detail: `${bad} observaciones con formato inesperado` });
   // parsear, ordenar, deduplicar y marcar calidad (nunca se descarta un dato: se marca)
   const parsed: { t: number; v: number | null }[] = [];
@@ -183,6 +184,7 @@ async function loadSeries(st: SeriesState) {
           continue;
         }
       }
+      if (!near && Math.abs(d1) > th && (b.t - a.t) > 7 * D) st.baseFrom = b.t; // probable cambio de cero: la historia comparable empieza acá
       st.issues.push({ ts: iso(b.t), issue: "level_shift", detail: `escalón de ${d1 > 0 ? "+" : ""}${d1.toFixed(2)} m ${near ? "" : `tras ${Math.round((b.t - a.t) / D)} días sin datos `}(crecida real o posible cambio de cero de escala)` });
     }
   }

@@ -294,7 +294,7 @@ export function propagation(stations: { key: string; name: string }[], data: Rec
   const pairs: any[] = [];
   for (let i = 0; i + 1 < chain.length; i++) {
     const up = chain[i], down = chain[i + 1];
-    pairs.push({ from: up.key, from_name: up.name, to: down.key, to_name: down.name, ...lagCorrelation(win[up.key], win[down.key], CFG.propagationMaxLagH) });
+    pairs.push({ from: up.key, from_name: up.name, to: down.key, to_name: down.name, ...lagCorrelation(win[up.key], win[down.key], CFG.propagationMaxLagH, 24) });
   }
   const signals: any[] = [];
   chain.forEach((s, i) => {
@@ -336,4 +336,14 @@ export function propagation(stations: { key: string; name: string }[], data: Rec
     method: `Correlación cruzada entre variaciones de 6 h del nivel (series interpoladas a grilla horaria, huecos >12 h excluidos), últimos ${CFG.propagationDays} días, desfases 0–${CFG.propagationMaxLagH} h. El rango X–Y h son los desfases con correlación a ≤0,03 del máximo. La resolución real es la de la serie (1–4 h).`,
     disclaimer: "Estimación estadística basada en el comportamiento pasado de las series. NO es una predicción hidrológica oficial.",
   };
+}
+
+/** Clase según percentil de su propia historia (criterio tipo USGS). */
+export function pctClass(p: number | null): { label: string; code: string } | null {
+  if (p == null) return null;
+  if (p < 10) return { label: "muy bajo", code: "vlow" };
+  if (p < 25) return { label: "bajo", code: "low" };
+  if (p <= 75) return { label: "normal", code: "normal" };
+  if (p <= 90) return { label: "alto", code: "high" };
+  return { label: "muy alto", code: "vhigh" };
 }

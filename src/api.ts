@@ -33,7 +33,8 @@ export type Station = {
   level?: { value: number; unit: string; ts: string; ts_local: string; changes: Record<string, Change> } | null;
   status?: Status;
   stats_brief?: { avg_7d: number | null; avg_30d: number | null; avg_365d: number | null; p90_hist: number | null;
-    history_days: number; comparisons: Record<string, number | null>; same_month_mean: number | null } | null;
+    history_days: number; comparisons: Record<string, number | null>; same_month_mean: number | null;
+    pct?: number | null; pct_class?: { label: string; code: string } | null; hist?: Describe; base_from?: string | null } | null;
   flood?: Flood;
   discharge: null; discharge_note: string | null;
   rain?: RainSummary;
@@ -110,7 +111,12 @@ function seriesInfo(key: string) {
 }
 
 function stationStats(key: string) {
-  return cached(`stats:${key}`, () => an.stationStats(usable(key)));
+  const base = seriesOf(key, "level")?.baseFrom ?? 0;
+  return cached(`stats:${key}`, () => {
+    const st = an.stationStats(usable(key, "level", base));
+    if (st.available && base) st.method += ` Historia desde ${localStr(base)} por un probable cambio de cero de escala anterior.`;
+    return st;
+  });
 }
 
 function stationSummary(key: string): Station {
@@ -129,7 +135,9 @@ function stationSummary(key: string): Station {
       ts_local: localStr(recent[recent.length - 1][0]), changes: an.changes(recent), measured: true } : null;
     out.status = an.stationStatus(recent, stats, settings().thresholds[key]?.crecida_m);
     out.stats_brief = stats.available ? { avg_7d: stats.windows["7d"].mean, avg_30d: stats.windows["30d"].mean, avg_365d: stats.windows["365d"].mean,
-      p90_hist: stats.windows.historico.p90, history_days: stats.history_days, comparisons: stats.comparisons, same_month_mean: stats.same_month_climatology.mean } : null;
+      p90_hist: stats.windows.historico.p90, history_days: stats.history_days, comparisons: stats.comparisons, same_month_mean: stats.same_month_climatology.mean,
+      pct: stats.percentile_rank_hist, pct_class: an.pctClass(stats.percentile_rank_hist), hist: stats.windows.historico,
+      base_from: seriesOf(key, "level")?.baseFrom ? iso(seriesOf(key, "level")!.baseFrom!) : null } : null;
     out.flood = an.floodDetection(sd.name, recent);
     const wk = recent.filter(([t]) => t >= Date.now() - 7 * D);
     const step = Math.max(1, Math.ceil(wk.length / 120));
