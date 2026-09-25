@@ -63,6 +63,7 @@ export const S = {
   loading: false,
   lastError: null as string | null,
   version: 0,
+  progress: { done: 0, total: 0 },
 };
 
 function buildCatalog() {
@@ -212,7 +213,8 @@ async function doLoad() {
       const old = S.series.get(d.id);
       defs.push(old ? { ...old, def: d, station: s.key } : { def: d, station: s.key, obs: [], verify: "pending", issues: [] });
     }
-    await pool(defs, 4, async (st) => { try { await loadSeries(st); } catch (e) { st.verify = "error"; st.error = String(e); } S.series.set(st.def.id, st); });
+    S.progress = { done: 0, total: defs.length };
+    await pool(defs, 4, async (st) => { try { await loadSeries(st); } catch (e) { st.verify = "error"; st.error = String(e); } S.series.set(st.def.id, st); S.progress.done++; });
     S.loadedAt = Date.now();
     const lvl = [...S.series.values()].filter((x) => x.def.role === "level");
     S.lastError = lvl.length && lvl.every((x) => x.verify === "error") ? "No se pudo contactar al INA (se muestran los datos ya cargados)." : null;

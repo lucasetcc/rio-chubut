@@ -28,6 +28,10 @@ export function MapPanel({ stations, rain, dam }: { stations: Station[]; rain: a
               <TileLayer url="https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png" maxZoom={17}
                 attribution='© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>, SRTM | © <a href="https://opentopomap.org">OpenTopoMap</a> (CC-BY-SA)' />
             </LayersControl.BaseLayer>
+            <LayersControl.BaseLayer name="Oscuro (CARTO)">
+              <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" maxZoom={19}
+                attribution='© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> © <a href="https://carto.com/attributions">CARTO</a>' />
+            </LayersControl.BaseLayer>
             <LayersControl.BaseLayer name="OpenStreetMap">
               <TileLayer url="https://tile.openstreetmap.org/{z}/{x}/{y}.png" maxZoom={19} attribution='© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' />
             </LayersControl.BaseLayer>

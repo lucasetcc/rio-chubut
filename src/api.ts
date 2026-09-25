@@ -37,6 +37,7 @@ export type Station = {
   flood?: Flood;
   discharge: null; discharge_note: string | null;
   rain?: RainSummary;
+  spark?: [number, number][];
 };
 
 export type Describe = { n: number; mean: number | null; min: number | null; max: number | null; median: number | null;
@@ -130,6 +131,9 @@ function stationSummary(key: string): Station {
     out.stats_brief = stats.available ? { avg_7d: stats.windows["7d"].mean, avg_30d: stats.windows["30d"].mean, avg_365d: stats.windows["365d"].mean,
       p90_hist: stats.windows.historico.p90, history_days: stats.history_days, comparisons: stats.comparisons, same_month_mean: stats.same_month_climatology.mean } : null;
     out.flood = an.floodDetection(sd.name, recent);
+    const wk = recent.filter(([t]) => t >= Date.now() - 7 * D);
+    const step = Math.max(1, Math.ceil(wk.length / 120));
+    out.spark = wk.filter((_, i) => i % step === 0 || i === wk.length - 1);
   }
   if (roles.has("rain")) out.rain = rainSummaryOf(key);
   return out as Station;

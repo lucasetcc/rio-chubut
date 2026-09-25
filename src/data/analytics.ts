@@ -6,13 +6,13 @@ export const D = 86400e3;
 
 export const CFG = {
   trendCmDay: 3,
-  staleHours: 10,
+  staleHours: 24,
   rapidRiseCm6h: 5,
   sustainedRiseCm24h: 5,
   propagationDays: 365,
   propagationMaxLagH: 120,
   rainResponseMinMm: 5,
-  suspectJumpM: 0.8,
+  suspectJumpM: 1.5,
   levelMin: -5,
   levelMax: 25,
   rainMaxStep: 150,

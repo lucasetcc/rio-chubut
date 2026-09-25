@@ -10,7 +10,7 @@ export function AlertsPanel({ alerts, reload }: { alerts: any[]; reload: () => v
       {active.length === 0 ? <div className="msg info">No hay alertas activas.</div> : active.map((a) => (
         <div key={a.id} className={`msg ${a.type === "rise" || a.type === "propagation" ? "warn" : ""}`} style={{ opacity: a.acknowledged ? 0.6 : 1 }}>
           <div className="row">
-            <b>⚠️ {a.message}</b><span className="spacer" />
+            <b>{a.message}</b><span className="spacer" />
             {!a.acknowledged && <button className="small" onClick={async () => { await api.ack(a.id); reload(); }}>Visto</button>}
           </div>
           <div className="small muted">Dato: {a.data_local || "—"} · regla: {a.rule_description}</div>

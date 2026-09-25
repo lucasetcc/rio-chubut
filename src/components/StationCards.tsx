@@ -1,52 +1,71 @@
 import { Station } from "../api";
-import { ago, cm, fDateTime, num, signed, STATION_COLOR } from "../fmt";
+import { ago, cm, fDateTime, num, signed, STATION_COLOR, stationColor } from "../fmt";
 
 export function StatusBadge({ s }: { s?: Station["status"] }) {
-  if (!s) return <span className="badge b-nodata">⚪ SIN DATOS</span>;
-  return <span className={`badge b-${s.code}`} title={s.why || ""}>{s.emoji} {s.label}</span>;
+  if (!s) return <span className="badge b-nodata">SIN DATOS</span>;
+  return <span className={`badge b-${s.code}`} title={s.why || ""}>{s.label}</span>;
 }
 
+export const STATUS_VAR: Record<string, string> = { stable: "var(--ok)", rising: "var(--rise)", falling: "var(--fall)", flood: "var(--flood)" };
+
 const Delta = ({ m }: { m: number | null | undefined }) =>
-  m === null || m === undefined ? <span className="muted">—</span> : <span className={m > 0 ? "up" : m < 0 ? "down" : ""}>{cm(m)}</span>;
+  m === null || m === undefined ? <b className="muted">—</b> : <b className={m > 0 ? "up" : m < 0 ? "down" : ""}>{cm(m)}</b>;
+
+/** Minigráfico de 7 días (línea fina + área suave, sin ejes). */
+export function Sparkline({ pts, color }: { pts?: [number, number][]; color: string }) {
+  if (!pts || pts.length < 2) return <div className="spark nodata small" style={{ display: "grid", placeItems: "center" }}>sin datos 7 d</div>;
+  const W = 200, Hh = 44, pad = 3;
+  const t0 = pts[0][0], t1 = pts[pts.length - 1][0];
+  let lo = Math.min(...pts.map((p) => p[1])), hi = Math.max(...pts.map((p) => p[1]));
+  if (hi - lo < 0.05) { const m = (hi + lo) / 2; lo = m - 0.025; hi = m + 0.025; }
+  const x = (t: number) => ((t - t0) / Math.max(1, t1 - t0)) * W;
+  const y = (v: number) => pad + (1 - (v - lo) / (hi - lo)) * (Hh - 2 * pad);
+  const d = pts.map((p, i) => `${i ? "L" : "M"}${x(p[0]).toFixed(1)},${y(p[1]).toFixed(1)}`).join("");
+  const last = pts[pts.length - 1];
+  return (
+    <svg className="spark" viewBox={`0 0 ${W} ${Hh}`} preserveAspectRatio="none" aria-label="últimos 7 días">
+      <path d={`${d}L${W},${Hh}L0,${Hh}Z`} fill={color} opacity={0.12} />
+      <path d={d} fill="none" stroke={color} strokeWidth={1.8} vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
+      <circle cx={x(last[0])} cy={y(last[1])} r={2.8} fill={color} />
+    </svg>
+  );
+}
 
 export function StationCard({ s }: { s: Station }) {
   const lv = s.level;
   const ch = lv?.changes || {};
   const tr = s.status?.trend;
+  const color = stationColor(s.key);
   return (
-    <div className="st-card">
-      <h3>
-        <span className="swatch" style={{ background: STATION_COLOR[s.key] }} />
-        {s.name}
-      </h3>
-      <div className="row" style={{ marginTop: 6 }}>
+    <div className="st-card" style={{ ["--status" as any]: STATUS_VAR[s.status?.code || ""] || "var(--stale)" }}>
+      <div className="head">
+        <h3><span className="swatch" style={{ background: color }} />{s.name}</h3>
         <StatusBadge s={s.status} />
-        {tr?.cm_per_day != null && <span className="small muted">{signed(tr.cm_per_day, " cm/día")}</span>}
       </div>
       {lv ? (
         <>
-          <div className="big">{num(lv.value)} <small>m</small></div>
-          <div className="small muted">Nivel hidrométrico (escala local, medido)</div>
-          <dl className="kv">
-            <dt>Caudal</dt><dd className="nodata" title={s.discharge_note || ""}>sin datos públicos</dd>
-            <dt>1 h</dt><dd>{ch["1h"]?.delta_m == null ? <span className="muted" title={ch["1h"]?.reason}>n/d</span> : <Delta m={ch["1h"].delta_m} />}</dd>
-            <dt>6 h</dt><dd><Delta m={ch["6h"]?.delta_m} /></dd>
-            <dt>24 h</dt><dd><Delta m={ch["24h"]?.delta_m} /></dd>
-            <dt>7 días</dt><dd><Delta m={ch["7d"]?.delta_m} /></dd>
-            <dt>30 días</dt><dd><Delta m={ch["30d"]?.delta_m} /></dd>
-            <dt>vs prom. 30 d</dt><dd><Delta m={s.stats_brief?.comparisons?.["30d"]} /></dd>
-          </dl>
-          <div className="small" style={{ marginTop: 8 }}>
-            Último dato: <b>{fDateTime(lv.ts)}</b> <span className="muted">({ago(lv.ts)})</span>
+          <div className="big">{num(lv.value)}<small>m</small>
+            {tr?.cm_per_day != null && <span className={`rate ${tr.cm_per_day > 0 ? "up" : tr.cm_per_day < 0 ? "down" : "muted"}`}>{signed(tr.cm_per_day, " cm/d")}</span>}
           </div>
-          {s.status?.stale && <div className="stale-note">⚠ Estación sin actualizar</div>}
+          <div className="caption">Nivel (escala local) · caudal: sin datos públicos</div>
+          <Sparkline pts={s.spark} color={color} />
+          <div className="deltas">
+            <div><span>6 h</span><Delta m={ch["6h"]?.delta_m} /></div>
+            <div><span>24 h</span><Delta m={ch["24h"]?.delta_m} /></div>
+            <div><span>7 d</span><Delta m={ch["7d"]?.delta_m} /></div>
+            <div><span>30 d</span><Delta m={ch["30d"]?.delta_m} /></div>
+            <div><span>1 h</span>{ch["1h"]?.delta_m == null ? <b className="muted" title={ch["1h"]?.reason}>n/d</b> : <Delta m={ch["1h"].delta_m} />}</div>
+            <div><span>vs 30 d</span><Delta m={s.stats_brief?.comparisons?.["30d"]} /></div>
+          </div>
+          <div className="foot">
+            <span title={fDateTime(lv.ts)}>{fDateTime(lv.ts).slice(0, 5)} {fDateTime(lv.ts).slice(-5)} · {ago(lv.ts)}</span>
+            <a href={s.source.url} target="_blank" rel="noreferrer">INA ↗</a>
+          </div>
+          {s.status?.stale && <div className="stale-note">Sin datos nuevos hace más de 24 h</div>}
         </>
       ) : (
-        <div className="nodata" style={{ marginTop: 10 }}>Sin datos de nivel almacenados todavía.</div>
+        <div className="nodata" style={{ marginTop: 12 }}>Sin datos de nivel.</div>
       )}
-      <div className="src" style={{ marginTop: 6 }}>
-        Fuente: INA · serie {s.series.find((x) => x.role === "level")?.id} · <a href={s.source.url} target="_blank" rel="noreferrer">Ver fuente original ↗</a>
-      </div>
     </div>
   );
 }

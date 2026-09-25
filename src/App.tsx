@@ -4,16 +4,36 @@ import { AlertsPanel, ConfigPanel, ExportPanel, SystemPanel } from "./components
 import { LevelChart } from "./components/Charts";
 import { DamPanel, DamSummary } from "./components/DamPanel";
 import { MapPanel } from "./components/MapPanel";
+import { Headline, Kpis, RiverProfile } from "./components/Overview";
 import { FloodPanel, PropagationPanel } from "./components/Propagation";
 import { RainPanel } from "./components/RainPanel";
 import { StationCard, StationTable } from "./components/StationCards";
 import { StatsPanel } from "./components/StatsPanel";
+import { S } from "./data/engine";
 import { ago, fDateTime } from "./fmt";
 
 const NAV = [
-  ["estado", "Estado"], ["graficos", "📈 Evolución"], ["comparacion", "Promedios"], ["lluvia", "🌧️ Lluvia"],
-  ["propagacion", "🌊 Propagación"], ["mapa", "🗺️ Mapa"], ["dique", "Dique"], ["alertas", "⚠️ Alertas"], ["datos", "Datos y config."],
+  ["estado", "Estado"], ["graficos", "Evolución"], ["comparacion", "Promedios"], ["lluvia", "Lluvia"],
+  ["propagacion", "Propagación"], ["mapa", "Mapa"], ["dique", "Dique"], ["alertas", "Alertas"], ["datos", "Datos"],
 ];
+
+const Logo = () => (
+  <span className="logo" aria-hidden>
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round">
+      <path d="M2 9c2.5 0 2.5-2 5-2s2.5 2 5 2 2.5-2 5-2 2.5 2 5 2" />
+      <path d="M2 15c2.5 0 2.5-2 5-2s2.5 2 5 2 2.5-2 5-2 2.5 2 5 2" opacity=".65" />
+    </svg>
+  </span>
+);
+
+function useTheme() {
+  const [theme, setTheme] = useState<string>(() => { try { return localStorage.getItem("theme") || "dark"; } catch { return "dark"; } });
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    try { localStorage.setItem("theme", theme); } catch { /* */ }
+  }, [theme]);
+  return [theme, () => setTheme(theme === "dark" ? "light" : "dark")] as const;
+}
 
 export default function App() {
   const [stations, setStations] = useState<Station[] | null>(null);
@@ -26,6 +46,9 @@ export default function App() {
   const [err, setErr] = useState<string | null>(null);
   const [statsKey, setStatsKey] = useState("cerro_condor");
   const [collectMsg, setCollectMsg] = useState<string | null>(null);
+  const [progress, setProgress] = useState({ done: 0, total: 0 });
+  const [theme, toggleTheme] = useTheme();
+  const [, force] = useState(0);
 
   const load = useCallback(async () => {
     try {
@@ -37,64 +60,93 @@ export default function App() {
       api.alerts().then(setAlerts).catch(() => {});
       api.propagation().then(setProp).catch(() => {});
     } catch (e) {
-      setErr(`No se pudo contactar al backend: ${e}`);
+      setErr(`No se pudieron cargar los datos: ${e}`);
     }
   }, []);
 
   useEffect(() => {
     load();
     const t = setInterval(async () => { await api.collect().catch(() => {}); load(); }, 5 * 60_000);
-    return () => clearInterval(t);
+    const p = setInterval(() => setProgress({ ...S.progress }), 300);
+    return () => { clearInterval(t); clearInterval(p); };
   }, [load]);
 
+  // los gráficos leen colores del tema: redibujar al cambiarlo
+  useEffect(() => { force((x) => x + 1); }, [theme]);
+
   if (!stations) {
-    return <div className="wrap" style={{ paddingTop: 40 }}>{err ? <div className="err">{err}</div> : "Cargando datos del INA…"}</div>;
+    const pct = progress.total ? Math.round((100 * progress.done) / progress.total) : 5;
+    return (
+      <div className="loading">
+        <div>
+          <div className="brand" style={{ justifyContent: "center" }}><Logo /><div style={{ textAlign: "left" }}><b>Río Chubut — Monitor Hidrológico</b><small>Cuenca aportante al Dique F. Ameghino</small></div></div>
+          {err ? <div className="err" style={{ marginTop: 16 }}>{err}</div> : <>
+            <div className="bar"><i style={{ width: `${pct}%` }} /></div>
+            <div className="small muted">Descargando series del INA… {progress.total ? `${progress.done}/${progress.total}` : ""}</div>
+          </>}
+        </div>
+      </div>
+    );
   }
 
   const main = stations.filter((s) => s.main && s.has_level).sort((a, b) => (a.chain_order || 0) - (b.chain_order || 0));
   const others = stations.filter((s) => !s.main);
   const activeAlerts = alerts.filter((a) => !a.cleared_at);
   const empty = !status?.last_data_ts;
+  const liveCls = status?.overall?.code === "ok" ? "" : status?.overall?.code === "error" ? "err" : "warn";
 
   const collect = async () => {
-    setCollectMsg(null);
-    setCollectMsg("actualizando…"); try { const r = await api.collect(); setCollectMsg(r.status); load(); } catch (e) { setCollectMsg(String(e)); }
+    setCollectMsg("actualizando…");
+    try { const r = await api.collect(); setCollectMsg(r.status); load(); } catch (e) { setCollectMsg(String(e)); }
   };
 
   return (
     <>
       <header className="top">
         <div className="wrap">
-          <div className="brand">RÍO CHUBUT — MONITOR HIDROLÓGICO<small>Cuenca aportante al Dique Florentino Ameghino</small></div>
-          <nav className="sections">{NAV.map(([id, l]) => <a key={id} href={`#${id}`}>{l}{id === "alertas" && activeAlerts.length ? ` (${activeAlerts.length})` : ""}</a>)}</nav>
-          <span className="pill"><span className="real">● {status?.mode || "REAL DATA"}</span></span>
+          <div className="brand"><Logo /><div><b>Río Chubut</b><small>Monitor hidrológico</small></div></div>
+          <nav className="sections">
+            {NAV.map(([id, l]) => (
+              <a key={id} href={`#${id}`}>{l}{id === "alertas" && activeAlerts.length ? <span className="count">{activeAlerts.length}</span> : null}</a>
+            ))}
+          </nav>
+          <span className={`live ${liveCls}`} title={status?.overall?.label}><span className="dot" /><span className="txt">Datos INA en vivo</span></span>
+          <button className="small ghost" onClick={toggleTheme} title="Cambiar tema" aria-label="Cambiar tema">{theme === "dark" ? "☀" : "☾"}</button>
         </div>
       </header>
 
       <main className="wrap">
-        <section id="estado">
+        <section id="estado" style={{ marginTop: 22 }}>
           <div className="hero card">
             <div>
-              <div className="sys">{status?.overall?.emoji} Sistema general: {status?.overall?.label}</div>
-              <div className="small">
-                Último dato recibido: <b>{status?.last_data_local || "—"}</b>{status?.last_data_ts && <span className="muted"> ({ago(status.last_data_ts)})</span>}
-                {" · "}Datos cargados: {status?.collector?.last_cycle?.at ? `${fDateTime(status.collector.last_cycle.at)}` : "—"}
-                
+              <h1>Estado del Río Chubut</h1>
+              <Headline main={main} prop={prop} />
+              <div className="meta">
+                {status?.overall?.label} · Último dato: <b>{status?.last_data_local || "—"}</b>{status?.last_data_ts && ` (${ago(status.last_data_ts)})`}
+                {" · "}Actualizado: {status?.collector?.last_cycle?.at ? fDateTime(status.collector.last_cycle.at).slice(-5) : "—"}
               </div>
             </div>
-            <span className="spacer" />
-            <button onClick={collect}>Actualizar ahora</button>
-            {collectMsg && <span className="small muted">{collectMsg}</span>}
+            <div className="row" style={{ justifyContent: "flex-end" }}>
+              {collectMsg && <span className="small muted">{collectMsg}</span>}
+              <button onClick={collect}>↻ Actualizar</button>
+            </div>
           </div>
           {err && <div className="msg crit">{err}</div>}
           {empty && <div className="msg warn">No llegaron datos del INA. Puede estar caído o lento: la página reintenta sola cada 5 minutos.</div>}
-          {activeAlerts.slice(0, 3).map((a) => <div key={a.id} className="msg warn">⚠️ {a.message}</div>)}
+          <Kpis status={status} main={main} rain={rain} alerts={alerts} />
+        </section>
 
-          <h2 style={{ marginTop: 18, fontSize: 13, letterSpacing: ".12em", color: "var(--text-2)" }}>ESTADO ACTUAL · aguas arriba → aguas abajo</h2>
+        <section>
+          <h2>Perfil de la cuenca <span className="hint">aguas arriba → aguas abajo · tiempos de viaje estimados entre estaciones</span></h2>
+          <RiverProfile main={main} prop={prop} dam={dam} />
+        </section>
+
+        <section>
+          <h2>Estaciones principales <span className="hint">nivel medido · minigráfico de 7 días</span></h2>
           <div className="chain">{main.map((s) => <StationCard key={s.key} s={s} />)}</div>
-          <div className="grid g2" style={{ marginTop: 12 }}>
-            <DamSummary dam={dam} stations={stations} />
+          <div className="grid g2" style={{ marginTop: 14 }}>
             <FloodPanel floods={floods} />
+            <DamSummary dam={dam} stations={stations} />
           </div>
         </section>
 
@@ -104,28 +156,28 @@ export default function App() {
         </section>
 
         <section id="graficos">
-          <h2>📈 Evolución <span className="hint">zoom con rueda/arrastre · superponé estaciones para ver la crecida viajar aguas abajo</span></h2>
-          <LevelChart stations={stations} initial={main[0]?.key || "cerro_condor"} />
+          <h2>Evolución <span className="hint">zoom con rueda o arrastre · superponé estaciones para ver la crecida viajar aguas abajo</span></h2>
+          <LevelChart key={theme} stations={stations} initial={main[0]?.key || "cerro_condor"} />
         </section>
 
         <section id="comparacion">
           <h2>Comparación con el pasado</h2>
-          <StatsPanel stations={stations} selected={statsKey} onSelect={setStatsKey} />
+          <StatsPanel key={theme} stations={stations} selected={statsKey} onSelect={setStatsKey} />
         </section>
 
         <section id="lluvia">
-          <h2>🌧️ Precipitaciones</h2>
-          <RainPanel rain={rain} stations={stations} />
+          <h2>Precipitaciones</h2>
+          <RainPanel key={theme} rain={rain} stations={stations} />
         </section>
 
         <section id="propagacion">
-          <h2>🌊 Propagación de la crecida <span className="hint">estimación estadística, no pronóstico oficial</span></h2>
-          <PropagationPanel prop={prop} />
+          <h2>Propagación de la crecida <span className="hint">estimación estadística, no pronóstico oficial</span></h2>
+          <PropagationPanel key={theme} prop={prop} />
         </section>
 
         <section id="mapa">
-          <h2>🗺️ Mapa de la cuenca</h2>
-          <MapPanel stations={stations} rain={rain} dam={dam} />
+          <h2>Mapa de la cuenca</h2>
+          <MapPanel key={theme} stations={stations} rain={rain} dam={dam} />
         </section>
 
         <section id="dique">
@@ -134,24 +186,26 @@ export default function App() {
         </section>
 
         <section id="alertas">
-          <h2>⚠️ Alertas</h2>
+          <h2>Alertas</h2>
           <AlertsPanel alerts={alerts} reload={load} />
         </section>
 
         <section id="datos">
           <h2>Exportar datos</h2>
           <ExportPanel stations={stations} />
-          <h2 style={{ marginTop: 20 }}>Configuración</h2>
+          <h2 style={{ marginTop: 24 }}>Configuración</h2>
           <ConfigPanel stations={stations} reloadAll={load} />
-          <h2 style={{ marginTop: 20 }}>Estado de las fuentes</h2>
+          <h2 style={{ marginTop: 24 }}>Estado de las fuentes</h2>
           <SystemPanel status={status} />
-          <p className="src">
-            Fuente de datos: Instituto Nacional del Agua (INA), <a href="https://alerta.ina.gob.ar/" target="_blank" rel="noreferrer">alerta.ina.gob.ar</a> — Red Hidrológica Nacional.
-            Horarios en hora argentina. Esta aplicación no es un sistema oficial de alerta.
-          </p>
         </section>
       </main>
+
+      <footer className="foot">
+        <div className="wrap">
+          <span>Datos: Instituto Nacional del Agua (INA) — <a href="https://alerta.ina.gob.ar/" target="_blank" rel="noreferrer">alerta.ina.gob.ar</a>, Red Hidrológica Nacional. Horarios en hora argentina.</span>
+          <span>No es un sistema oficial de alerta. Las propagaciones son estimaciones estadísticas.</span>
+        </div>
+      </footer>
     </>
   );
 }
-

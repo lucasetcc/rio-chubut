@@ -2,12 +2,20 @@ import ReactECharts from "echarts-for-react";
 import { cssVar, fDateTime, num } from "../fmt";
 
 export function FloodPanel({ floods }: { floods: any[] }) {
-  const msgs = floods.flatMap((f) => f.messages.map((m: string) => ({ k: f.key, m, warn: m.startsWith("⚠") })));
+  const msgs = floods.flatMap((f) => f.messages.map((m: string) => ({ k: f.key, m: m.replace(/^⚠️\s*/, ""), warn: m.startsWith("⚠"), avg: m.includes("promedio de los últimos 30") })));
+  const main = msgs.filter((x) => !x.avg);
+  const avg = msgs.filter((x) => x.avg);
   return (
     <div className="card">
-      <h4 style={{ margin: "0 0 6px", fontSize: 13 }}>Detección automática de crecidas</h4>
-      {msgs.length === 0 ? <div className="msg info">No se detectan subidas rápidas ni sostenidas en las estaciones con datos.</div>
-        : msgs.map((x, i) => <div key={i} className={`msg ${x.warn ? "warn" : "info"}`}>{x.m}</div>)}
+      <h4>Detección automática de crecidas</h4>
+      {main.length === 0 ? <div className="msg info">No se detectan subidas rápidas ni sostenidas en las estaciones con datos.</div>
+        : main.map((x, i) => <div key={i} className={`msg ${x.warn ? "warn" : "info"}`}>{x.m}</div>)}
+      {avg.length > 0 && (
+        <details style={{ margin: "6px 0" }}>
+          <summary className="small">Comparación con el promedio de 30 días ({avg.length})</summary>
+          {avg.map((x, i) => <div key={i} className="msg info small">{x.m}</div>)}
+        </details>
+      )}
       <div className="tablewrap" style={{ marginTop: 10 }}>
         <table>
           <thead><tr><th>Estación</th><th className="n">6 h</th><th className="n">12 h</th><th className="n">24 h</th><th className="n">cm/h</th><th className="n">cm/día</th><th>Rápida</th><th>Sostenida</th><th className="n">Máx 24 h</th><th className="n">Máx 7 d</th><th className="n">Máx 30 d</th></tr></thead>
