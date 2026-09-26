@@ -8,6 +8,7 @@
  * Rutas:
  *   /api/ina/meta/<seriesId>/<bucket>          metadata de la serie
  *   /api/ina/obs/<seriesId>/<año>-Q<n>          observaciones de un trimestre cerrado (cache largo)
+ *   /api/ina/obs/<seriesId>/<año>               observaciones de un año cerrado (cache largo; red histórica)
  *   /api/ina/obs/<seriesId>/recent/<bucket>     observaciones desde el inicio del trimestre actual hasta ahora
  *   /api/ina/estaciones/<texto>                 búsqueda de estaciones por nombre
  *   /api/ina/series-estacion/<estacionId>/<día> series de una estación (<día> = bucket diario ±1)
@@ -81,10 +82,15 @@ export default async (req: Request) => {
       const qStart = (y: number, q: number) => new Date(Date.UTC(y, (q - 1) * 3, 1)).toISOString().replace(/\.\d{3}Z$/, "Z");
       const curQ = Math.floor(now.getUTCMonth() / 3) + 1;
       const m = /^(\d{4})-Q([1-4])$/.exec(b || "");
+      const yr = /^(\d{4})$/.exec(b || "");
       if (b === "recent") {
         start = qStart(now.getUTCFullYear(), curQ);
         end = new Date(now.getTime() + 3600e3).toISOString().replace(/\.\d{3}Z$/, "Z");
         cdn = SHORT;
+      } else if (yr && Number(yr[1]) >= 2000 && Number(yr[1]) < now.getUTCFullYear()) {
+        start = qStart(Number(yr[1]), 1);
+        end = qStart(Number(yr[1]) + 1, 1);
+        cdn = LONG;
       } else if (m && Number(m[1]) >= 2000 && (Number(m[1]) < now.getUTCFullYear() || (Number(m[1]) === now.getUTCFullYear() && Number(m[2]) < curQ))) {
         const y = Number(m[1]), q = Number(m[2]);
         start = qStart(y, q);

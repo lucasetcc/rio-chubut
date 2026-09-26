@@ -54,3 +54,47 @@ describe("lluvia parcial", () => {
     expect(w.partial).toBe(true);
   });
 });
+
+describe("historia de la red anterior (BDHI)", () => {
+  const H = 3600e3;
+  const mk = (from: number, n: number, f: (i: number) => number) => Array.from({ length: n }, (_, i) => ({ t: from + i * H, v: f(i), q: "VALID" as const }));
+  const setup = async (extShift: number, extNoise = 0) => {
+    const E = await import("../src/data/engine");
+    E.S.stations = [{ key: "x", name: "X", river: "", kind: "hydro", main: true, chain_order: 1, ina_station_id: 1, lat: 0, lon: 0, notes: "",
+      series: [{ id: 1, role: "level", var_id: 2 }, { id: 2, role: "level_ext", var_id: 2 }] }] as any;
+    const t0 = Date.parse("2021-09-01T00:00:00Z");
+    E.S.series.set(1, { def: { id: 1, role: "level", var_id: 2 }, station: "x", verify: "ok", issues: [], obs: mk(t0, 500, (i) => 1 + (i % 24) / 100) } as any);
+    E.S.series.set(2, { def: { id: 2, role: "level_ext", var_id: 2 }, station: "x", verify: "ok", issues: [],
+      obs: mk(t0 - 1000 * H, 1200, (i) => 1 + ((i - 1000 + 2400) % 24) / 100 - extShift + (extNoise ? ((i * 7919) % 11) / 100 - 0.05 : 0)) } as any);
+    E.S.version++;
+    return E;
+  };
+  it("si coinciden en el período común, antepone la historia", async () => {
+    const E = await setup(0);
+    expect(E.usable("x").length).toBe(1500);
+    expect(E.extInfo("x")?.used).toBe(true);
+  });
+  it("corrimiento constante de cero: se corrige", async () => {
+    const E = await setup(0.5);
+    const p = E.usable("x");
+    expect(E.extInfo("x")?.offset_m).toBeCloseTo(0.5, 2);
+    expect(p[0][1]).toBeCloseTo(1.08, 2);
+  });
+  it("si no coinciden (ruido), no se une", async () => {
+    const E = await setup(0, 1);
+    expect(E.usable("x").length).toBe(500);
+    expect(E.extInfo("x")?.used).toBe(false);
+  });
+});
+
+describe("proxy GloFAS", () => {
+  it("sólo permite historia de los puntos candidatos", async () => {
+    const m = await import("../netlify/functions/glofas.mts");
+    const c = m.candidates();
+    expect(c.length).toBe(30);
+    const bad = await m.default(new Request("https://x/api/glofas/hist/-10/-60"));
+    expect(bad.status).toBe(404);
+    const badB = await m.default(new Request("https://x/api/glofas/recent/audit-test"));
+    expect(badB.status).toBe(400);
+  });
+});

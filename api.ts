@@ -60,7 +60,7 @@ export type Stats = {
 // ======================================================================================
 import * as an from "./data/analytics";
 import { CFG, D, H, iso, localDate, P } from "./data/analytics";
-import { DEFAULT_RULES, lastValidTs, loadAll, loadHist, loadSettings, S, seriesOf, Settings, sourceUrl, usable } from "./data/engine";
+import { DEFAULT_RULES, extInfo, lastValidTs, loadAll, loadHist, loadSettings, S, seriesOf, Settings, sourceUrl, usable } from "./data/engine";
 import { fDateTime, safeUrl } from "./fmt";
 import seed from "./data/stations.json";
 import damRef from "./data/dam_reference.json";
@@ -110,7 +110,7 @@ function seriesInfo(key: string) {
     const st = S.series.get(d.id);
     const lt = st?.obs.length ? iso(st.obs[st.obs.length - 1].t) : null;
     return { id: d.id, role: d.role, var_code: st?.meta?.var?.var ?? null, var_name: st?.meta?.var?.nombre ?? null, unit: st?.unit ?? null,
-      verify_status: st?.verify ?? (d.role === "level_hist" ? "se carga al abrir el histórico" : "pending"), verify_detail: st?.verify_detail ?? null,
+      verify_status: st?.verify ?? (d.role === "level_hist" ? "se carga al abrir el histórico" : "pending"), verify_detail: st?.verify_detail ?? (d.role === "level_ext" ? (extInfo(key)?.used ? `unida: ${extInfo(key)!.reason}` : extInfo(key)?.reason ?? null) : null),
       last_obs_ts: lt, last_obs_local: localStr(lt), source_url: sourceUrl(d.id),
       last_fetch_status: st?.verify === "error" ? "error" : st ? "ok" : null, last_error: st?.error ?? null, error_at: st?.error_at ?? null,
       fetched_at: st?.fetched_at ?? null, last_fetch_at: st?.fetched_at ?? st?.error_at ?? null };
@@ -122,6 +122,10 @@ function stationStats(key: string) {
   return cached(`stats:${key}`, () => {
     const st = an.stationStats(usable(key, "level", base));
     if (st.available && base) st.method += ` Historia desde ${localStr(base)} por un probable cambio de cero de escala anterior.`;
+    const xi = extInfo(key);
+    if (st.available && xi) st.method += xi.used && !base
+      ? ` Incluye la red histórica del INA (serie ${xi.series_id}) desde ${localStr(xi.from!)?.slice(0, 10)}: ${xi.reason} (${xi.overlap_n} registros comparados).`
+      : ` Red histórica del INA (serie ${xi.series_id}) no usada: ${xi.reason}.`;
     return st;
   });
 }
@@ -227,7 +231,7 @@ function evalAlerts() {
         }
       } else if (rule.type === "propagation") {
         for (const sig of prop().signals) for (const d of sig.downstream) {
-          if ((!rule.station_key || d.to === rule.station_key) && !d.already_rising && d.hours_from_now[1] >= 0) {
+          if ((!rule.station_key || d.to === rule.station_key) && !d.already_rising && d.hours_from_now[1] >= 0 && d.confidence !== "baja") {
             const [a, b] = d.hours_from_now;
             push(d.to, d.peak_known
               ? `El pico de ${sig.name} podría llegar a ${d.to_name} en ~${Math.round(Math.max(a, 0))}–${Math.round(b)} h (estimación estadística).`
@@ -305,7 +309,10 @@ export const api = {
     }
     if (agg === "daily") return { unit: "m", data: [...an.dailyMeans(usable(k, "level", since)).entries()].map(([date, v]) => ({ date, ...v })) };
     const st = seriesOf(k, "level");
-    let rows = (st?.obs || []).filter((o) => o.t >= since && o.v !== null).map((o) => ({ ts: iso(o.t), value: o.v, quality: o.q, quality_note: o.note, source: "INA" }));
+    const xi = extInfo(k);
+    const t0 = st?.obs[0]?.t ?? Infinity;
+    const extRows = xi?.used ? usable(k, "level", since).filter(([t]) => t < t0).map(([t, v]) => ({ ts: iso(t), value: v, quality: "VALID", quality_note: undefined, source: "INA (red histórica)" })) : [];
+    let rows = [...extRows, ...(st?.obs || []).filter((o) => o.t >= since && o.v !== null).map((o) => ({ ts: iso(o.t), value: o.v, quality: o.q, quality_note: o.note, source: "INA" }))];
     if (rows.length > 6000) { const step = Math.ceil(rows.length / 5000); rows = rows.filter((_, i) => i % step === 0 || i === rows.length - 1); }
     return { unit: "m", data: rows };
   },
@@ -489,6 +496,36 @@ export const api = {
     return extra;
   },
   async ignoreDiscovered(id: number) { return saveSettings({ ignored_series: [...(S.settings.ignored_series || []), id] }); },
+  /** Caudal MODELADO (GloFAS). Se carga sólo al abrir su pestaña; si falla no afecta al resto. */
+  async glofas() {
+    await loadAll();
+    const r = await fetch(`/api/glofas/recent/${Math.floor(Date.now() / (3 * 3600e3))}`);
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(body.error || `HTTP ${r.status}`);
+    const today = localDate(Date.now());
+    const byKey = new Map<string, any[]>();
+    for (const p of body.points) { if (!p.daily) continue; const a = byKey.get(p.key) || []; a.push(p); byKey.set(p.key, a); }
+    const stations = await Promise.all([...byKey.entries()].map(async ([key, pts]) => {
+      const name = S.stations.find((s) => s.key === key)?.name || key;
+      const meanOf = (p: any) => { const v = p.daily.river_discharge.filter((x: any) => x != null); return v.length ? v.reduce((a: number, b: number) => a + b, 0) / v.length : -1; };
+      const best = pts.reduce((a, b) => (meanOf(b) > meanOf(a) ? b : a));
+      try {
+        const h = await (await fetch(`/api/glofas/hist/${best.lat}/${best.lon}`)).json();
+        if (!h.daily) throw new Error(h.error || "sin historia");
+        const a = an.glofasAnalyze(best.daily, h.daily, today);
+        // verificación contra el nivel medido del INA (promedios diarios, desde 2019)
+        const lvl = an.dailyMeans(usable(key, "level", Date.parse("2019-01-01")));
+        const qx: number[] = [], lx: number[] = [];
+        h.daily.time.forEach((t: string, i: number) => { const q = h.daily.river_discharge[i], l = lvl.get(t); if (q != null && l?.mean != null) { qx.push(q); lx.push(l.mean); } });
+        best.daily.time.forEach((t: string, i: number) => { if (t >= (h.daily.time[h.daily.time.length - 1] || "") && t < today) { const q = best.daily.river_discharge[i], l = lvl.get(t); if (q != null && l?.mean != null) { qx.push(q); lx.push(l.mean); } } });
+        const r = an.spearman(qx, lx);
+        return { key, name, glat: best.glat, glon: best.glon, daily: best.daily, ...a, check: { r, n: qx.length, grade: r == null ? "sin datos" : r >= 0.7 ? "buena" : r >= 0.4 ? "regular" : "mala" } };
+      } catch (e) { return { key, name, error: String(e) }; }
+    }));
+    const order = ["el_maiten", "gualjaina", "paso_del_sapo", "cerro_condor", "los_altares", "las_plumas"];
+    stations.sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key));
+    return { source: body.source, fetched_at: body.fetched_at, today, stations };
+  },
   async forecast() {
     const bucket = Math.floor(Date.now() / 1800e3);
     const r = await fetch(`/api/forecast/${bucket}`);

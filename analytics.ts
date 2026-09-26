@@ -487,12 +487,17 @@ export function propagation(stations: { key: string; name: string }[], data: Rec
   const pairs: any[] = [], direct: any[] = [];
   for (let i = 0; i + 1 < chain.length; i++) pairs.push(pairOf(i, i + 1));
   for (let i = 0; i < chain.length; i++) for (let j = i + 2; j < chain.length; j++) direct.push(pairOf(i, j));
-  const between = (i: number, j: number): [number, number] | null => {
+  const RANK: Record<string, number> = { baja: 0, media: 1, alta: 2 };
+  const between = (i: number, j: number): { r: [number, number]; conf: string } | null => {
     const d = direct.find((p) => p.from === chain[i].key && p.to === chain[j].key && p.ok);
-    if (d) return d.lag_range_h;
-    let lo = 0, hi = 0;
-    for (let k = i; k < j; k++) { const p = pairs[k]; if (!p.ok) return null; lo += p.lag_range_h[0]; hi += p.lag_range_h[1]; }
-    return [lo, hi];
+    if (d) return { r: d.lag_range_h, conf: d.confidence || "media" };
+    let lo = 0, hi = 0, conf = "alta";
+    for (let k = i; k < j; k++) {
+      const p = pairs[k]; if (!p.ok) return null;
+      lo += p.lag_range_h[0]; hi += p.lag_range_h[1];
+      if ((RANK[p.confidence] ?? 1) < RANK[conf]) conf = p.confidence;
+    }
+    return { r: [lo, hi], conf };
   };
   const signals: any[] = [];
   chain.forEach((s, i) => {
@@ -514,21 +519,23 @@ export function propagation(stations: { key: string; name: string }[], data: Rec
     const ref = peaked ? pk[0] : pts[pts.length - 1][0];
     const downstream: any[] = [];
     for (let j = i + 1; j < chain.length; j++) {
-      const r = between(i, j);
-      if (!r) continue;
+      const bj = between(i, j);
+      if (!bj) continue;
+      const r = bj.r;
       const tgt = chain[j];
       const etaLo = ref + r[0] * H, etaHi = ref + r[1] * H;
       downstream.push({ to: tgt.key, to_name: tgt.name, lag_range_h: r, eta_from: iso(etaLo), eta_to: iso(etaHi), peak_known: peaked,
         hours_from_now: [Math.round(((etaLo - now) / H) * 10) / 10, Math.round(((etaHi - now) / H) * 10) / 10],
-        already_rising: trend(win[tgt.key]).label === "SUBIENDO" });
+        already_rising: trend(win[tgt.key]).label === "SUBIENDO", confidence: bj.conf });
     }
     const msgs = [`Subida en ${s.name} (+${Math.round(riseCm)} cm) que empezó hace unas ${Math.round(hoursAgo)} h${peaked ? `; el pico fue ${fDateShort(pk[0])}` : "; todavía sin pico"}.`];
     for (const d of downstream) {
       const [a, b] = d.hours_from_now;
+      const low = d.confidence === "baja" ? " (confianza baja)" : "";
       const what = peaked ? "el pico podría llegar a" : "el pico no llegaría antes de ~";
       if (b < 0) msgs.push(`${d.to_name}: la ventana estimada ya pasó (${Math.round(-b)}–${Math.round(-a)} h atrás)${d.already_rising ? "; está subiendo" : ""}.`);
-      else if (peaked) msgs.push(`Estimación: ${what} ${d.to_name} en ~${Math.round(Math.max(a, 0))}–${Math.round(b)} h.`);
-      else msgs.push(`Estimación: en ${d.to_name} ${what}${Math.round(Math.max(a, 0))} h (${d.lag_range_h[0] === d.lag_range_h[1] ? d.lag_range_h[0] : `${d.lag_range_h[0]}–${d.lag_range_h[1]}`} h después del pico en ${s.name}).`);
+      else if (peaked) msgs.push(`Estimación${low}: ${what} ${d.to_name} en ~${Math.round(Math.max(a, 0))}–${Math.round(b)} h.`);
+      else msgs.push(`Estimación${low}: en ${d.to_name} ${what}${Math.round(Math.max(a, 0))} h (${d.lag_range_h[0] === d.lag_range_h[1] ? d.lag_range_h[0] : `${d.lag_range_h[0]}–${d.lag_range_h[1]}`} h después del pico en ${s.name}).`);
     }
     if (!downstream.length && i < chain.length - 1) msgs.push("No hay suficientes crecidas históricas emparejadas para estimar tiempos aguas abajo.");
     signals.push({ station: s.key, name: s.name, onset: iso(onset), hours_ago: hoursAgo, rise_cm: riseCm, peaked, peak_ts: iso(pk[0]), downstream, messages: msgs });
@@ -559,4 +566,37 @@ export function damBalance(qin: { value: number; ts: string } | null, qout: { va
   if (!qin || !qout) return null;
   if (qin.ts.slice(0, 10) !== qout.ts.slice(0, 10)) return null;
   return Math.round(((qin.value - qout.value) * 86400) / 1e3) / 1e3;
+}
+
+// ---------------------------------------------------------------- caudal modelado (GloFAS)
+const doyOf = (s: string) => { const d = Date.parse(s + "T12:00:00Z"); const y = new Date(d).getUTCFullYear(); return Math.floor((d - Date.UTC(y, 0, 0)) / D); };
+const qs = (a: number[], p: number) => { if (!a.length) return null; const b = [...a].sort((x, y) => x - y); const i = (b.length - 1) * p, lo = Math.floor(i); return b[lo] + (b[Math.min(lo + 1, b.length - 1)] - b[lo]) * (i - lo); };
+
+/** Compara el caudal modelado de hoy con el mismo período (±15 días) de todos los años del modelo. */
+export function glofasAnalyze(rec: { time: string[]; river_discharge: (number | null)[]; river_discharge_median?: (number | null)[] },
+  hist: { time: string[]; river_discharge: (number | null)[] }, today: string) {
+  const H2: [string, number, number][] = [];
+  hist.time.forEach((t, i) => { const v = hist.river_discharge[i]; if (v != null && t < today) H2.push([t, doyOf(t), v]); });
+  const win = (dd: number) => H2.filter((r) => { const k = Math.abs(r[1] - dd); return Math.min(k, 365 - k) <= 15; }).map((r) => r[2]);
+  const ti = rec.time.indexOf(today);
+  const now = ti >= 0 ? rec.river_discharge[ti] ?? null : null;
+  const w = win(doyOf(today));
+  const pct = now == null || w.length < 5 * 31 ? null : Math.round((100 * w.filter((v) => v <= now).length) / w.length);
+  const years = new Set(H2.map((r) => r[0].slice(0, 4))).size;
+  const in7 = ti >= 0 ? (rec.river_discharge_median?.[ti + 7] ?? rec.river_discharge[ti + 7] ?? null) : null;
+  const band = rec.time.map((t) => { const v = win(doyOf(t)); return { date: t, p25: qs(v, 0.25), p50: qs(v, 0.5), p75: qs(v, 0.75) }; });
+  const mean = H2.length ? H2.reduce((a, r) => a + r[2], 0) / H2.length : null;
+  return { now, pct, cls: years >= CFG.climClassMinYears ? pctClass(pct) : null, median: qs(w, 0.5), in7, band, mean, years, first_year: H2[0]?.[0].slice(0, 4) ?? null, ti };
+}
+
+/** Correlación de rangos (Spearman): ¿el caudal del modelo sube y baja cuando sube y baja el nivel medido? */
+export function spearman(a: number[], b: number[]): number | null {
+  const n = a.length;
+  if (n < 30 || b.length !== n) return null;
+  const rank = (x: number[]) => { const idx = x.map((v, i) => [v, i]).sort((p, q) => p[0] - q[0]); const r = new Array(n); let i = 0;
+    while (i < n) { let j = i; while (j + 1 < n && idx[j + 1][0] === idx[i][0]) j++; const avg = (i + j) / 2; for (let k = i; k <= j; k++) r[idx[k][1]] = avg; i = j + 1; } return r; };
+  const ra = rank(a), rb = rank(b), ma = (n - 1) / 2;
+  let sab = 0, saa = 0, sbb = 0;
+  for (let i = 0; i < n; i++) { const x = ra[i] - ma, y = rb[i] - ma; sab += x * y; saa += x * x; sbb += y * y; }
+  return saa && sbb ? Math.round((sab / Math.sqrt(saa * sbb)) * 100) / 100 : null;
 }

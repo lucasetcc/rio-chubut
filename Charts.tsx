@@ -25,7 +25,7 @@ export function baseAxis() {
 
 type Loaded = { key: string; name: string; points: [number, number, string][] };
 
-export function LevelChart({ stations, initial }: { stations: Station[]; initial: string }) {
+export function LevelChart({ stations, initial, single: only }: { stations: Station[]; initial: string; single?: boolean }) {
   const hydro = stations.filter((s) => s.has_level);
   const [range, setRange] = useState<(typeof RANGES)[number]["k"]>("30d");
   const [sel, setSel] = useState<string[]>([initial]);
@@ -132,10 +132,10 @@ export function LevelChart({ stations, initial }: { stations: Station[]; initial
         {sel.length === 1 && hydro.find((s) => s.key === sel[0])?.series.some((x) => x.role === "level_hist") && (
           <label className="chip"><input type="checkbox" checked={showBdhi} onChange={(e) => setShowBdhi(e.target.checked)} /> Serie histórica BDHI</label>
         )}
-        <label className="chip" title="Resta a cada estación la mediana de su registro: sirve para comparar la forma y el momento de las subidas (CALCULADO)"><input type="checkbox" checked={anom} onChange={(e) => setAnom(e.target.checked)} /> Centrar en la mediana de cada estación</label>
+        {!only && <label className="chip" title="Resta a cada estación la mediana de su registro: sirve para comparar la forma y el momento de las subidas (CALCULADO)"><input type="checkbox" checked={anom} onChange={(e) => setAnom(e.target.checked)} /> Centrar en la mediana de cada estación</label>}
         {loading && <span className="small muted">cargando…</span>}
       </div>
-      <div className="row" style={{ marginBottom: 8 }}>
+      {!only && <div className="row" style={{ marginBottom: 8 }}>
         <span className="small muted">Estaciones (clic para superponer):</span>
         {hydro.map((s) => (
           <span key={s.key} className={`chip ${sel.includes(s.key) ? "on" : ""}`} onClick={() => toggle(s.key)}>
@@ -146,7 +146,7 @@ export function LevelChart({ stations, initial }: { stations: Station[]; initial
         <button className="small" onClick={() => setSel(hydro.filter((s) => s.main).sort((a, b) => (a.chain_order || 0) - (b.chain_order || 0)).map((s) => s.key))}>
           Cadena principal
         </button>
-      </div>
+      </div>}
       <ReactECharts option={option} notMerge style={{ height: 380 }} />
       <div className="src">
         {r.agg === "daily" ? "Promedios diarios (hora argentina). " : "Datos del INA; los huecos se muestran cortando la línea y los puntos sospechosos como ▲ gris. "}

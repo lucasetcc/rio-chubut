@@ -9,6 +9,8 @@ import { S } from "./data/engine";
 import { ago, fDateTime } from "./fmt";
 
 // Pestañas pesadas (gráficos, mapa, admin) se cargan recién cuando se abren
+const StationDetail = lazy(() => import("./components/StationDetail").then((m) => ({ default: m.StationDetail })));
+const GlofasPanel = lazy(() => import("./components/GlofasPanel").then((m) => ({ default: m.GlofasPanel })));
 const LevelChart = lazy(() => import("./components/Charts").then((m) => ({ default: m.LevelChart })));
 const StatsPanel = lazy(() => import("./components/StatsPanel").then((m) => ({ default: m.StatsPanel })));
 const RainPanel = lazy(() => import("./components/RainPanel").then((m) => ({ default: m.RainPanel })));
@@ -20,13 +22,14 @@ const ConfigPanel = lazy(() => import("./components/AlertsConfig").then((m) => (
 const ExportPanel = lazy(() => import("./components/AlertsConfig").then((m) => ({ default: m.ExportPanel })));
 const SystemPanel = lazy(() => import("./components/AlertsConfig").then((m) => ({ default: m.SystemPanel })));
 
-const TABS = [["resumen", "Resumen"], ["evolucion", "Evolución"], ["lluvia", "Lluvia"], ["crecidas", "Indicadores"], ["mapa", "Mapa"], ["dique", "Dique"]];
+const TABS = [["resumen", "Resumen"], ["evolucion", "Evolución"], ["lluvia", "Lluvia"], ["crecidas", "Indicadores"], ["mapa", "Mapa"], ["dique", "Dique"], ["caudal", "Caudal (modelo)"]];
 
 const Logo = () => (
   <span className="logo" aria-hidden>
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round">
-      <path d="M2 9c2.5 0 2.5-2 5-2s2.5 2 5 2 2.5-2 5-2 2.5 2 5 2" />
-      <path d="M2 15c2.5 0 2.5-2 5-2s2.5 2 5 2 2.5-2 5-2 2.5 2 5 2" opacity=".65" />
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 4c5 0 2 6 7 6s3 6 8 6" />
+      <path d="M18 13v6" strokeWidth="2.6" />
+      <path d="M3 20h18" opacity=".55" />
     </svg>
   </span>
 );
@@ -48,6 +51,8 @@ export default function App() {
   const [status, setStatus] = useState<any>(null);
   const [rain, setRain] = useState<any>(null);
   const [prop, setProp] = useState<any>(null);
+  const [detail, setDetail] = useState<string | null>(null);
+  const closeDetail = useCallback(() => setDetail(null), []);
   const [floods, setFloods] = useState<any[]>([]);
   const [dam, setDam] = useState<any>(null);
   const [alerts, setAlerts] = useState<any[]>([]);
@@ -89,12 +94,14 @@ export default function App() {
     const t = setInterval(async () => { if (document.hidden) return; await api.collect().catch(() => {}); load(); }, 5 * 60_000);
     const onVis = () => { if (!document.hidden && Date.now() - S.loadedAt > 5 * 60_000) api.collect().then(load).catch(() => {}); };
     document.addEventListener("visibilitychange", onVis);
+    const onData = () => load();
+    window.addEventListener("rio-data", onData);
     // barra de progreso: sólo mientras se hace la primera carga
     const p = setInterval(() => {
       setProgress((cur) => (cur.done !== S.progress.done || cur.total !== S.progress.total ? { ...S.progress } : cur));
       if (S.loadedAt) clearInterval(p);
     }, 300);
-    return () => { clearInterval(t); clearInterval(p); document.removeEventListener("visibilitychange", onVis); };
+    return () => { clearInterval(t); clearInterval(p); document.removeEventListener("visibilitychange", onVis); window.removeEventListener("rio-data", onData); };
   }, [load]);
 
   // los gráficos leen colores del tema: redibujar al cambiarlo
@@ -117,6 +124,9 @@ export default function App() {
 
   const main = stations.filter((s) => s.main && s.has_level).sort((a, b) => (a.chain_order || 0) - (b.chain_order || 0));
   const others = stations.filter((s) => !s.main);
+  const TRIB_ORDER = ["norquinco", "gualjaina_rio", "tecka", "chico_ameghino"];
+  const tribs = stations.filter((s) => s.kind === "hydro" && !s.main && s.has_level && s.chain_order == null && s.key !== "chico_ameghino")
+    .sort((a, b) => (TRIB_ORDER.indexOf(a.key) + 99) % 99 - (TRIB_ORDER.indexOf(b.key) + 99) % 99);
   const activeAlerts = alerts.filter((a) => !a.cleared_at);
   const empty = !status?.last_data_ts;
   const liveCls = status?.overall?.code === "ok" ? "" : status?.overall?.code === "error" ? "err" : "warn";
@@ -165,12 +175,16 @@ export default function App() {
           </section>
           <section>
             <h2>El río, de la cabecera al dique <span className="hint">cada estación comparada con su propio nivel normal</span></h2>
-            <RiverProfile main={main} prop={prop} dam={dam} />
+            <RiverProfile main={main} prop={prop} dam={dam} onOpen={setDetail} />
           </section>
           <section>
             <h2>Estaciones <span className="hint">número grande = lectura de la regla de cada estación (no es profundidad ni se compara entre estaciones)</span></h2>
-            <div className="chain">{main.map((s) => <StationCard key={s.key} s={s} />)}</div>
+            <div className="chain">{main.map((s) => <StationCard key={s.key} s={s} onOpen={setDetail} />)}</div>
           </section>
+          {tribs.length > 0 && <section>
+            <h2>Afluentes <span className="hint">ríos que desembocan en el Chubut (o en el embalse); anticipan lo que puede llegar</span></h2>
+            <div className="chain">{tribs.map((s) => <StationCard key={s.key} s={s} onOpen={setDetail} />)}</div>
+          </section>}
           <section>
             <div className="grid g2">
               <DamSummary dam={dam} stations={stations} />
@@ -234,6 +248,11 @@ export default function App() {
           <DamPanel dam={dam} stations={stations} reload={load} admin={ADMIN} />
         </section>}
 
+        {tab === "caudal" && <section style={{ marginTop: 22 }}>
+          <h2>Caudal del Río Chubut <span className="hint">modelo GloFAS (Copernicus) · estimación, no medición</span></h2>
+          <GlofasPanel key={theme} />
+        </section>}
+
         {tab === "admin" && ADMIN && <section style={{ marginTop: 22 }}>
           <h2>Exportar datos</h2>
           <ExportPanel stations={stations} />
@@ -251,6 +270,11 @@ export default function App() {
           <span>No es un sistema oficial de alerta. Las propagaciones son estimaciones estadísticas.</span>
         </div>
       </footer>
+      {detail && stations.find((x) => x.key === detail) && (
+        <Suspense fallback={null}>
+          <StationDetail s={stations.find((x) => x.key === detail)!} prop={prop} fc={fc} onClose={closeDetail} />
+        </Suspense>
+      )}
     </>
   );
 }
